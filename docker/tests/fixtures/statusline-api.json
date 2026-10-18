@@ -1,0 +1,7 @@
+{
+  "session_id": "9a9a9a9a-2222-4c2b-9a77-0123456789ab",
+  "cwd": "/workspace/app",
+  "model": { "id": "claude-sonnet-5", "display_name": "Sonnet 5" },
+  "workspace": { "current_dir": "/workspace/app" },
+  "context_window": { "used_percentage": null }
+}

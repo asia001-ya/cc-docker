@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Terminal scroll regression</title>
+<style>
+  body { padding: 16px; box-sizing: border-box; }
+  #toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+  #toolbar button { padding: 4px 8px; background: #353c48; border-radius: 4px; font-size: 12px; }
+  #terminal { width: min(720px, 100%); height: 260px; margin-top: 12px; }
+  #status, #events { white-space: pre-wrap; font: 12px monospace; margin-top: 12px; }
+</style>
+<div id="toolbar">
+<button id="seed">Reset numbered history</button>
+<button id="append">Append 10 lines</button>
+<button id="mouse">Mouse reporting: off</button>
+<button id="renderer">Renderer: DOM</button>
+<button id="guard">History guard: on</button>
+<button id="live">Live output: off</button>
+</div>
+<div id="terminal" class="terminal-has-scrollback"></div>
+<pre id="status"></pre><pre id="events"></pre>
+<script type="module" src="./terminal-scroll.js"></script>
+</html>

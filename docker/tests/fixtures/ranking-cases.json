@@ -1,0 +1,43 @@
+{
+  "_comment": "额度健康度与热切换候选排序的共享用例：docker/tests/run-tests.mjs 与 src-tauri/src/quota/switch.rs 测试同时使用。now 固定，quota 字段与 quota.json 协议一致。",
+  "now": 1792120000,
+  "settings": { "warn_threshold": 30, "critical_threshold": 5, "switch_threshold": 100, "allow_api_fallback": false, "include_stopped": false },
+  "containers": [
+    { "name": "claude-dev-01", "running": true, "auth_mode": "subscription",
+      "quota": { "five_hour": { "used_percentage": 100, "resets_at": 1792130400 }, "seven_day": { "used_percentage": 60, "resets_at": 1792562400 } } },
+    { "name": "claude-dev-02", "running": true, "auth_mode": "subscription",
+      "quota": { "five_hour": { "used_percentage": 15, "resets_at": 1792130400 }, "seven_day": { "used_percentage": 40, "resets_at": 1792562400 } } },
+    { "name": "claude-dev-03", "running": true, "auth_mode": "subscription",
+      "quota": { "five_hour": { "used_percentage": 97, "resets_at": 1792110000 }, "seven_day": { "used_percentage": 20, "resets_at": 1792562400 } } },
+    { "name": "claude-dev-04", "running": true, "auth_mode": "subscription",
+      "quota": { "five_hour": { "used_percentage": 80, "resets_at": 1792125000 }, "seven_day": { "used_percentage": 10, "resets_at": 1792562400 } } },
+    { "name": "claude-dev-05", "running": true, "auth_mode": "subscription", "quota": null },
+    { "name": "claude-dev-06", "running": false, "auth_mode": "subscription",
+      "quota": { "five_hour": { "used_percentage": 0, "resets_at": 1792130400 }, "seven_day": { "used_percentage": 0, "resets_at": 1792562400 } } },
+    { "name": "claude-dev-07", "running": true, "auth_mode": "api", "quota": null },
+    { "name": "claude-dev-08", "running": true, "auth_mode": "subscription", "limit_hit": true,
+      "quota": { "five_hour": { "used_percentage": 50, "resets_at": 1792130400 }, "seven_day": null } }
+  ],
+  "expect": {
+    "health": {
+      "claude-dev-01": "exhausted",
+      "claude-dev-02": "healthy",
+      "claude-dev-03": "healthy",
+      "claude-dev-04": "warning",
+      "claude-dev-05": "unknown",
+      "claude-dev-06": "stopped",
+      "claude-dev-07": "api",
+      "claude-dev-08": "exhausted"
+    },
+    "remaining": {
+      "claude-dev-01": 0,
+      "claude-dev-02": 60,
+      "claude-dev-03": 80,
+      "claude-dev-04": 20,
+      "claude-dev-05": null
+    },
+    "rank_default": ["claude-dev-03", "claude-dev-02", "claude-dev-04", "claude-dev-05"],
+    "rank_with_stopped_and_api": ["claude-dev-03", "claude-dev-02", "claude-dev-04", "claude-dev-05", "claude-dev-06", "claude-dev-07"],
+    "blocked_until_01": 1792130400
+  }
+}

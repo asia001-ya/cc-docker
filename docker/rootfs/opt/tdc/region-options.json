@@ -1,0 +1,33 @@
+{
+  "defaults": { "timezone": "Asia/Shanghai", "locale": "C.UTF-8" },
+  "timezones": [
+    { "value": "Asia/Shanghai", "label": "中国大陆 · Asia/Shanghai" },
+    { "value": "Asia/Hong_Kong", "label": "中国香港 · Asia/Hong_Kong" },
+    { "value": "Asia/Taipei", "label": "中国台湾 · Asia/Taipei" },
+    { "value": "Asia/Tokyo", "label": "日本 · Asia/Tokyo" },
+    { "value": "Asia/Seoul", "label": "韩国 · Asia/Seoul" },
+    { "value": "Asia/Singapore", "label": "新加坡 · Asia/Singapore" },
+    { "value": "Asia/Kolkata", "label": "印度 · Asia/Kolkata" },
+    { "value": "Asia/Dubai", "label": "迪拜 · Asia/Dubai" },
+    { "value": "UTC", "label": "协调世界时 · UTC" },
+    { "value": "Europe/London", "label": "英国 · Europe/London" },
+    { "value": "Europe/Berlin", "label": "德国 · Europe/Berlin" },
+    { "value": "Europe/Paris", "label": "法国 · Europe/Paris" },
+    { "value": "America/New_York", "label": "美国东部 · America/New_York" },
+    { "value": "America/Chicago", "label": "美国中部 · America/Chicago" },
+    { "value": "America/Denver", "label": "美国山地 · America/Denver" },
+    { "value": "America/Los_Angeles", "label": "美国西部 · America/Los_Angeles" },
+    { "value": "America/Toronto", "label": "加拿大 · America/Toronto" },
+    { "value": "America/Sao_Paulo", "label": "巴西 · America/Sao_Paulo" },
+    { "value": "Australia/Sydney", "label": "澳大利亚 · Australia/Sydney" },
+    { "value": "Pacific/Auckland", "label": "新西兰 · Pacific/Auckland" }
+  ],
+  "locales": [
+    { "value": "C.UTF-8", "label": "通用 UTF-8（默认）", "language": "" },
+    { "value": "zh_CN.UTF-8", "label": "简体中文", "language": "zh_CN:zh" },
+    { "value": "zh_TW.UTF-8", "label": "繁體中文", "language": "zh_TW:zh" },
+    { "value": "en_US.UTF-8", "label": "English（美国）", "language": "en_US:en" },
+    { "value": "ja_JP.UTF-8", "label": "日本語", "language": "ja_JP:ja" },
+    { "value": "ko_KR.UTF-8", "label": "한국어", "language": "ko_KR:ko" }
+  ]
+}

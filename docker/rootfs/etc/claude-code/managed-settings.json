@@ -1,0 +1,8 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node /opt/tdc/statusline.mjs",
+    "padding": 0,
+    "refreshInterval": 5
+  }
+}

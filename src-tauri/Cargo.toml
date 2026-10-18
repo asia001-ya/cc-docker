@@ -1,0 +1,39 @@
+[package]
+name = "tht-docker-claude"
+version = "0.1.0"
+description = "Claude 多容器终端管理器"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+# `_lib` 后缀避免与 bin 同名（Windows 已知问题）
+name = "tdc_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"            # 选择挂载目录 / 凭证文件
+tauri-plugin-opener = "2"            # 点击端口链接、OAuth URL 用系统浏览器打开
+tauri-plugin-single-instance = "2"   # 防多开（多开会导致同一 tmux 会话被重复附着）
+bollard = "0.21"                     # Docker Engine API（Windows 走 named pipe）
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "process"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+regex = "1"
+tar = "0.4"                          # upload_to_container 需要 tar 流
+url = "2"                            # 解析 vless 分享链接与订阅地址
+percent-encoding = "2"               # 还原 socks5 链接中的用户名与密码（url 的底层依赖，不引入新 crate）
+keyring = { version = "3", features = ["windows-native"] } # API Token 存 Windows 凭据管理器
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

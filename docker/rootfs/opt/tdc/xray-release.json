@@ -1,0 +1,8 @@
+{
+  "version": "26.9.8",
+  "baseUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.9.8",
+  "assets": {
+    "amd64": { "file": "Xray-linux-64.zip", "sha256": "a8c6d5b53957600d7e18d16e697201a4c942fe823307deb039bf8f40587aa556" },
+    "arm64": { "file": "Xray-linux-arm64-v8a.zip", "sha256": "6721edb5b80e046536abc8235bd0977a2c69ade88ad42c01c0df368beba070dc" }
+  }
+}

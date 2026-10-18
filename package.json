@@ -1,0 +1,52 @@
+{
+  "name": "tht-docker-claude",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Claude 多容器终端管理器（终端至上的 Windows 桌面端）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/check-bundle-privacy.mjs && tsc --noEmit && vite build && node scripts/check-bundle-privacy.mjs --dist",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:privacy": "node --test scripts/check-bundle-privacy.test.mjs",
+    "test:outputs": "node --test tests/output-reader.test.mjs",
+    "test:statusline": "node --test docker/tests/statusline-display-tests.mjs",
+    "test:git-sharing": "node --test docker/tests/git-bridge-tests.mjs",
+    "test:docker": "node --test docker/tests/run-tests.mjs docker/tests/xray-tests.mjs docker/tests/claude-launcher-tests.mjs docker/tests/session-history-tests.mjs docker/tests/host-config-tests.mjs docker/tests/usage-attribution-tests.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@fontsource/fira-code": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "@tauri-apps/plugin-opener": "^2.7.2",
+    "@xterm/addon-clipboard": "^0.2.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
+    "material-symbols": "^0.48.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^5.2.0",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12"
+  }
+}

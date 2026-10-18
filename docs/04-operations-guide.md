@@ -1,0 +1,218 @@
+# 04 · 操作指南
+
+## 1. 前置环境
+
+| 组件 | 要求 | 说明 |
+|---|---|---|
+| Windows | 10 22H2+ / 11 | 已满足（Windows 11 Pro 22631） |
+| WSL2 | `wsl --install` | Docker Desktop 安装时会启用 WSL2 后端（本机已有 docker-desktop 发行版） |
+| Docker Desktop | 4.x，**WSL2 后端** | 本机已安装（Docker 29.8.2）；确认 `docker version` 能看到 Server |
+| WebView2 | Windows 11 预装 | |
+| 开发构建额外需要 | Node 20+、Rust stable（MSVC）、VS 2022 Build Tools（C++） | 本机已有 Node 24、Rust 1.97 |
+
+> 在 Git Bash 中调用 docker：路径参数会被改写，请先 `export MSYS_NO_PATHCONV=1`（脚本已内置）。
+
+## 2. 构建容器镜像
+
+**应用内构建（推荐）**：首次启动时若本地没有默认镜像（设置 → Docker 引擎 → 默认镜像，默认 `tdc/claude-dev:latest`），启动页只提供「构建镜像」这一步，新建容器弹框也会拦截并内嵌同一个构建面板。构建上下文（`docker/Dockerfile`、`tmux.conf`、`rootfs/`）编译时内置进应用，经 Docker API 以经典构建器构建，实时显示步骤与输出；构建在后台任务中进行，关闭弹框或刷新界面不会中断。
+Dockerfile 不声明 `# syntax`，避免 BuildKit 额外拉取 `docker/dockerfile` 前端镜像（国内网络下 auth.docker.io 常超时）。已有但过旧的镜像（缺少 `tdc.xray` 等标签）目前仍需手动重建。
+
+**手动构建**：
+
+```bash
+cd docker
+docker build -t tdc/claude-dev:latest .
+# 指定 Claude Code 版本：
+docker build --build-arg CLAUDE_CODE_VERSION=2.1.300 -t tdc/claude-dev:latest .
+```
+
+验证真彩与 tmux：
+```bash
+docker run --rm -it tdc/claude-dev:latest bash -lc '
+  echo $TERM $COLORTERM;
+  awk "BEGIN{for(i=0;i<80;i++){r=255-i*3;g=i*3;printf \"\033[48;2;%d;%d;100m \033[0m\",r,g}print}";
+  tmux -f /etc/tmux.conf new -d -s t && tmux show -g default-terminal && tmux show -s terminal-features'
+```
+期望：`xterm-256color truecolor`，一条平滑渐变色带，`tmux-256color`，terminal-features 含 `xterm-256color:RGB`。
+
+## 3. 两种使用方式
+
+### 方式 A：桌面端（推荐）
+
+```bash
+npm ci
+npm run tauri dev          # 开发运行
+npm run tauri build        # 产出 NSIS 安装包：src-tauri/target/release/bundle/nsis/
+```
+1. 首次启动若状态栏显示"Docker 未连接"，打开 设置 → Docker 引擎 → 测试连接。
+2. 标题栏 `▣` 或 Ctrl+Shift+N → 新建容器：
+   - 名称如 `claude-dev-01`；授权选"独立订阅账号"；
+   - 在“基础实例配置”选择**容器时区**和**系统语言**。默认 Asia/Shanghai 与通用 UTF-8；支持简体中文、繁体中文、英语、日语、韩语。系统语言影响命令提示与日期格式，不控制 Claude 回复语言；
+   - 添加项目目录（建议 `\\wsl$\Ubuntu\home\<你>\app`），容器路径保持 `/workspace/app`；
+   - **所有需要互相切换的容器挂载同一项目到相同容器路径，并加入同一共享组**；
+   - 需要代理时，在共享会话池右侧的“代理设置”中开启，选择节点，可选静态中转（vless）、出口（SOCKS5）和局域网直连。节点库与右键容器 → 代理共用；“管理节点…”在当前弹框内展开，保留已填写的创建参数；
+   - 立即创建并启动 → 自动弹出授权框 → "在终端中登录"。
+3. 登录：终端里 claude 显示登录选项 → 选择订阅账号 → 按住 Ctrl 点击授权链接 → 浏览器授权 → 复制授权码 → Ctrl+V（或 Ctrl+Shift+V）粘贴 → 回车。
+   - 剪贴板：Ctrl+V / Ctrl+Shift+V 均可粘贴；剪贴板只有图片（png / jpg / gif / webp，如截图）时，图片写入容器 `/tmp/tdc-paste-*.{ext}` 并把路径粘进终端，Claude Code 显示为 `[Image #N]`。终端内鼠标拖选（tmux copy-mode）松开即复制到宿主剪贴板；容器内程序经 OSC 52 读宿主剪贴板被禁止。
+4. 对第二个账号重复 2–3（`claude-dev-02`）。
+5. 在任一会话中正常使用 claude；首次响应后状态栏出现 5h / 周额度。
+6. 额度用尽时弹框 4 自动弹出 → Enter 切换；或随时在侧栏点"智能切至最高额度"。
+7. 分屏后，点击各窗格标题条右侧的 `×` 可单独关闭该会话，剩余窗格自动填满空位；也可先点击目标终端，再按 `Ctrl+Shift+W`。顶部标签页的 `×` 会关闭该标签页内的全部会话。
+
+**YOLO 模式**：在“新建终端会话”选择 `claude`、继续或恢复时，可开启 YOLO 开关，以 `--permission-mode bypassPermissions` 启动并跳过 Claude 工具权限确认。每次打开新建窗口默认关闭；关闭时沿用 Claude 默认配置或手填的额外参数。开启时权限模式以开关为准，其他额外参数照常保留。该选项只作用于本次启动，不改写 Claude 全局设置，也不改变已经运行的会话；bash 和自定义命令不注入该参数。应用重启重新附着同一 tmux 进程时，该进程原有模式保持不变。
+
+**输入栏状态信息**：显示模型、思考级别、实际上下文容量、上下文进度条、Git 分支、当前目录和 Claude 会话名，每五秒刷新。Claude 自带的权限模式提示另行显示。详见 [状态栏说明与已有容器更新](10-statusline.md)。
+
+时区与系统语言会写入容器环境，重建时保留。选择“沿用镜像”后也可通过自定义环境变量配置；显式选择时，请勿重复填写 `TZ`、`LANG`、`LC_ALL`、`LANGUAGE`。中文等语言需要新版标准镜像，旧镜像请先在项目根目录运行 `docker build -t tdc/claude-dev:latest docker`，已有容器不会随镜像更新而改变。
+
+新建时代理默认关闭。开启会自动授予代理能力，配置与绑定在首次启动前写入；“仅创建”也会保存，之后启动时生效。代理配置写入失败会移除本次尚未启动的容器，保留命名卷，可修改后重试；节点不可用时仍遵循原有的断网保护。
+
+选择节点后，可点“校验自检”：使用当前镜像和代理链路启动临时测试容器，执行与右键代理相同的内核、TUN、DNS、外网连通和断网保护检查。进度和逐项结果显示在独立浮层中，不撑高创建表单；关闭后可点“查看结果”重新打开，Esc 只关闭最上层浮层。网络连通后还会以容器内普通用户查询公网出口 IP（包含所选出口节点的影响）；查询服务不可用会单独提示，不改变已有检查结果。结束后自动清理，不保存容器绑定；修改节点、镜像或节点库后旧结果失效。自检期间暂停创建；纯浏览器演示模式不能执行真实检查，需在桌面工具中操作。
+
+### Claude 对话历史与滚动条
+
+底部状态栏显示当前会话名称，点击名称打开会话列表（未打开终端时显示“会话列表”）。可搜索会话名称、容器与工作目录，按“已打开 / 历史”或容器筛选。已打开的会话点击“切换”会定位到对应标签页和分屏；历史会话点击“新终端恢复”会使用记录中的容器、原目录和对话 ID，在新的终端标签页启动 Claude，保留当前终端。已打开的同一对话不会重复创建。列表显示可读标题、目录和最近活动时间；未记录目录或容器未运行时会提示原因。
+
+新建终端选择“恢复”时，历史列表优先显示 Claude 的自定义标题或自动标题，没有标题则使用摘要或首条用户消息；项目名和最近活动时间用于区分同名会话。会话 ID 保留在详情和手动输入入口。选择历史后会带入名称与工作目录，已手工编辑的字段保持原值。
+
+桌面端新建 Claude 会话默认使用全屏渲染模式，避免长回答、表格在窗口缩放和重绘时重复进入终端历史。对话历史由 Claude 内部管理，使用鼠标滚轮或 `PgUp` / `PgDn` 查看；此时外层 tmux 滚动条不显示，因为它无法获得 Claude 虚拟历史的总行数。普通 shell 和显式选择经典模式的 Claude 仍使用外层历史滚动条。
+
+经典终端的实时底部和历史区均可直接用鼠标拖选可见文字，按 `Ctrl+Shift+C` 复制；松手会保留选区与当前位置，无需按住 Shift。滚轮和右侧滑块共用同一历史位置，按滚动条上的 `End` 返回实时输出。滚动使用每个会话复用的连接，避免拖动时反复创建 Docker exec。
+
+已有 Claude 出现段落重复或表格残留时，等待当前输出完成，在输入区执行 `/tui fullscreen`（Claude 2.1.300 支持，会重新加载界面并恢复对话）。仅重启桌面外壳会重新附着原会话，不会改变正在运行的 Claude 渲染模式。新建 Claude 会话的默认值由桌面后端注入，旧镜像中的已有容器也可使用；容器 shell 中手工执行 `claude` 的默认值则需要更新镜像中的启动脚本。明确需要外层历史时，可设置 `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` 或执行 `/tui default`，但经典模式仍可能在重绘时污染历史。已有污染的 tmux 历史不会被自动删除，原始 Claude 对话记录不受影响。
+
+桌面端重连同一个 tmux 会话时会替换其旧客户端，避免重启后累积多个客户端、互相影响尺寸。该操作保留会话里的 Claude / shell 进程；连接到同一会话的旧终端会显示已分离。
+
+### 壁纸与玻璃效果
+
+打开“设置 → 壁纸与玻璃”，可选择图片或视频作为整个终端工作区的背景。图片支持 PNG、JPG/JPEG、WebP、GIF、BMP（最大 40 MiB），视频支持 MP4、WebM（最大 500 MiB）；视频静音循环，窗口隐藏或系统要求减少动态效果时暂停。视频编码需要 WebView 支持，建议 H.264 MP4 或 WebM。
+
+导入会复制到应用数据目录的 `wallpapers` 文件夹，之后移动或删除源文件不影响已保存壁纸。支持填充、适应、拉伸、居中，图片还可平铺。分别调整壁纸不透明度、壁纸模糊、压暗、终端底色不透明度、面板不透明度和面板玻璃模糊；终端文字不受背景滤镜影响。
+
+调整立即预览到工作区，点击“保存”后持久生效；“取消”恢复原设置并清理本次导入的未使用副本。“清除”后保存可回到原有背景，“恢复默认效果”只重置效果参数、保留所选媒体。导入失败保留原壁纸。调整这些外观参数不会重建终端、重启容器或清空输出。
+
+### 方式 B：纯命令行（docker compose）
+
+```bash
+cd docker
+cp .env.example .env            # 修改 PROJECT_DIR / PROJECT_NAME
+docker compose up -d --build
+docker exec -u node -it claude-dev-01 tdc-session main /workspace/app claude   # 进入并登录账号 A
+docker exec -u node -it claude-dev-02 tdc-session main /workspace/app claude   # 账号 B
+./scripts/tdc-quota.sh                                                  # 查看额度
+./scripts/tdc-switch.sh claude-dev-01 main                              # A 耗尽时切到推荐容器
+```
+`tdc-session` 在 tmux 中运行，`Ctrl+B` 不再是前缀；断开终端后会话保留，再次执行同一命令即重新附着。
+
+> 镜像入口以 root 运行（代理兜底需要），**手工 `docker exec` 必须带 `-u node`**，否则以 root 进入：claude 会拒绝运行，tmux 也找不到 node 的会话。
+
+## 4. API 供应商模式（CC Switch 风格）
+
+Claude 官方模型价格随安装包内置，首次加载旧供应商或新增供应商时自动补齐，已有自定义报价保留。设置页「用量定价」可展开查看、修改或恢复官方价，换电脑后无需重新录入这些基础模型价格。参见 [Claude 内置定价与估算范围](07-claude-pricing.md)。
+
+1. 设置 → API 供应商 → 新增：名称、Base URL（空 = 官方）、模型、Token 变量、Token。Token 存入 Windows 凭据管理器（`控制面板 → 凭据管理器 → Windows 凭据`，服务名 `tht-docker-claude`）。
+2. 侧栏右键容器 → 账号授权 / 切换 API → API 供应商 → 选择 → 切换。
+3. 已打开的 claude 会话需重启生效（关闭会话后新建，或 `/exit` 后在该会话执行 `claude --resume`）。
+4. 切回订阅：同一弹框选"终端内登录"或"导入凭证文件"，会写入空 env 的 provider-settings。
+
+容器内的 `claude` 命令会在每次启动时读取 `$CLAUDE_CONFIG_DIR/tdc/provider-settings.json`。退出到 shell 后，可以切换目录再执行 `claude` 或 `claude --resume`；纯 shell 会话、自定义命令也使用相同配置。显式传入 `--settings` 时，使用指定的设置文件。供应商 Token 仍由 Claude 从文件读取，不写入 shell 启动文件。
+
+**旧容器临时处理**：出现“新建会话正常，退出后重开提示登录”时，可在该容器的终端执行：
+
+```bash
+claude --settings "${CLAUDE_CONFIG_DIR:-/home/node/.claude}/tdc/provider-settings.json"
+```
+
+**已有容器安装修复**：在宿主的项目根目录执行以下命令，将 `<容器名>` 替换为实际名称。同步更新控制脚本，让切容器时也能识别包装入口启动的原生 Claude 进程。无需重启容器或结束当前 tmux 会话；安装后下一次运行 `claude` 即生效。该操作保留原始 CLI 入口和现有凭据，可重复执行。
+
+```bash
+docker cp docker/rootfs/opt/tdc/tdc-claude.sh <容器名>:/opt/tdc/tdc-claude.sh
+docker cp docker/rootfs/opt/tdc/tdc-session-history.mjs <容器名>:/opt/tdc/tdc-session-history.mjs
+docker cp docker/rootfs/opt/tdc/tdc-host-config.mjs <容器名>:/opt/tdc/tdc-host-config.mjs
+docker cp docker/rootfs/opt/tdc/tdc-ctl.sh <容器名>:/opt/tdc/tdc-ctl.sh
+docker exec -u root <容器名> bash -c 'set -eu; chmod 0755 /opt/tdc/tdc-claude.sh /opt/tdc/tdc-ctl.sh; if [ ! -e /usr/local/bin/tdc-claude-real ]; then mv /usr/local/bin/claude /usr/local/bin/tdc-claude-real; fi; ln -sf /opt/tdc/tdc-claude.sh /usr/local/bin/claude'
+```
+
+新建容器需使用更新后的镜像（项目根目录执行 `docker build -t tdc/claude-dev:latest docker`）；仅更新镜像不会改变已有容器。容器内手工重装 Claude 的 npm 包会覆盖包装入口，之后需重新执行上述安装步骤。
+
+## 5. 共享会话卷
+
+- 新建时勾选"多容器共享会话池"即可；已有容器在 侧栏 → 共享会话卷 中调整。
+- 调整会**重建容器**（保留镜像、端口、挂载、环境变量与凭证卷），其中运行的 tmux 会话会结束。
+- 共享内容：`~/.claude/projects`（会话历史）、`~/.claude-shared`（CLAUDE.md / skills / commands / agents，启动时链接到 `~/.claude`）。凭证不共享。
+
+### 可选共享宿主 Claude 配置
+
+新建容器中的“宿主 Claude 配置”可以分别启用 Skills、Commands、Agents、CLAUDE.md 和 MCP；已有容器可通过侧栏右键 →“宿主 Claude 配置…”调整。默认全部关闭，继续使用容器原配置。
+
+- Skills、Commands、Agents 和 CLAUDE.md 使用所选宿主路径的只读挂载。启用时保留原容器文件，关闭挂载后恢复原项；原有共享会话组仍按自身规则生效。
+- MCP 自动检测宿主 Claude 的用户配置及已启用插件，也可手动添加 JSON 来源。仅导出服务器配置，与容器自身 MCP 合并；同名服务器以宿主为准，多份宿主来源按列表顺序合并、后面的优先。不会挂载整份 Claude 账号配置或共享 OAuth 登录状态。
+- MCP 在应用时导入；来源文件内容变化、路径未变化时，点击“重新导入 MCP”即可更新，下次启动 Claude 生效，当前终端继续运行。`stdio` 服务在 Linux 容器内执行，所需命令、依赖、浏览器和环境变量需在容器中可用。Windows 的 `cmd.exe` / 盘符路径不能直接使用；宿主服务的 `localhost` 地址通常需改为 `host.docker.internal`。远程 HTTP 服务仍可能需要单独授权。显式传入 `--mcp-config` 或 `--strict-mcp-config` 时，遵循该次 Claude 启动参数。
+- 宿主挂载面向本机 Docker 引擎；连接远端引擎时，应用不能把本机路径当作远端路径使用。
+
+调整已有容器的挂载需要点击“应用并重建”，会结束该容器内的 tmux 和后台进程。应用前保存原容器文件快照，保留 home / projects 数据卷和项目挂载；失败时尝试恢复原容器。成功后可从底部会话列表恢复历史对话。表单编辑与预检不会修改运行中的容器。
+
+新建容器需使用本次更新后的标准镜像；旧标准容器通过此入口应用时会在候选容器中更新所需脚本，自定义入口或不兼容的镜像会在预检中提示。
+
+## 6. 容器内代理
+
+1. 设置 → 代理节点 → 新增：订阅链接（Clash YAML 或 base64 分享链接列表）或单条 vless 链接。地址存入 Windows 凭据管理器，列表只显示摘要。
+2. 侧栏右键容器 → 代理… → 开启 → 选择节点（必填）→ 可选静态中转（单条 vless）→ 可选"允许直连宿主机与局域网" → 应用并自检。
+3. 自检 7 项全绿才算生效；任一项失败时网络保持断开，可修改后重试，或点左下角"关闭代理（恢复直连）"。
+4. 订阅节点在弹框下方手动选择、测延迟、刷新订阅；选中的节点不可用时容器断网，不会自动换。
+5. 旧容器（旧镜像或创建时未授予能力）会提示"授予代理能力（重建容器）"。镜像需先按第 2 节重新构建。
+6. 命令行：`docker exec -u root <容器> tdc-ctl proxy-status` / `proxy-off`；原理与限制见 docs/06。
+
+## 7. 端口
+
+- 容器内服务需监听 `0.0.0.0`（如 `npm run dev -- --host 0.0.0.0`），否则状态栏会提示"仅监听 127.0.0.1"。
+- 只有创建时映射过的端口可从宿主访问；需要新端口时只能重建容器（Docker 限制）。
+- 宿主端口只绑定 `127.0.0.1`，局域网不可见。
+
+## 8. 排障
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| 状态栏"Docker 未连接" | Docker Desktop 未启动；或设置里的地址错误（留空即用默认 npipe） |
+| 新建容器提示"本地没有镜像" | 先执行第 2 节构建镜像 |
+| 额度一直显示"—" / "等待首次响应" | 该容器的 claude 还没有完成过一次响应；或为 API 模式；或镜像不含 `/opt/tdc`（侧栏卡片显示黄色警告） |
+| 额度显示"*" | 重置时间已过，数据是推断值；在该容器运行一次 claude 即可刷新 |
+| 切换后提示"未能继承对话" | 两容器未在同一共享组，或 statusline 尚未上报 session_id |
+| 切换报"目标容器中不存在目录" | 两容器项目挂载路径不一致 |
+| 容器内脚本报 `/bin/bash^M` | 脚本被转成了 CRLF。仓库 `.gitattributes` 已强制 LF；如手工编辑过请转回 LF 后重建镜像 |
+| 中文 / emoji 宽度错乱 | 已启用 Unicode 11；若仍异常，关闭 设置 → WebGL 加速渲染 对比 |
+| Claude 对话很长却没有外层滚动条 | 默认全屏模式由 Claude 管理历史，使用滚轮或 `PgUp` / `PgDn`。需要外层历史时可显式使用 `/tui default`，但可能重新遇到经典界面的重绘问题 |
+| 长回答 / 表格重复插入正文 | 等待输出完成后执行 `/tui fullscreen`。新版默认全屏；窗口尺寸更新会合并并串行同步，失败自动重试。切换模式不删除旧的 tmux 历史 |
+| Ctrl+B 在终端里无效 | 设置 → 快捷键 中侧栏键被改成了 Ctrl+B，改回 Ctrl+Shift+B |
+| 关闭应用后会话没了 | 新建会话时关闭了"tmux 持久化"，或容器被停止 / 重建 |
+| 手工 `docker exec` 进入后 claude 报不能以 root 运行 | 镜像入口为 root，命令需加 `-u node` |
+| 新建会话正常，退出后在其他目录运行 `claude` 提示登录 | 旧镜像仅在首次启动传入供应商设置；按第 4 节安装修复，或临时加 `--settings "$CLAUDE_CONFIG_DIR/tdc/provider-settings.json"` |
+| 代理弹框提示"镜像不支持代理" | 用新 Dockerfile 重新构建镜像，再点"授予代理能力（重建容器）" |
+| 代理显示"已断网" | 内核或节点不可用（查看弹框中的最近错误）；守护会自动重启内核；节点失效时换节点或关闭代理 |
+| 开启代理后容器名无法解析 | 设计如此（DNS 全量劫持防泄露），容器间用 IP 访问 |
+| 开启代理后访问不了宿主服务 / 局域网数据库 | 默认禁止直连，在代理弹框勾选"允许直连宿主机与局域网" |
+| 代理开启后 HTTPS 偶发卡住 | 可能是 MTU 问题，见 docs/06 第 7 节 |
+
+## 9. 用量统计与定价
+
+底部“用量统计”打开总览，展示总成本、请求数、token、缓存 token 与缓存命中率。卡片默认显示当前仍存在的容器（包括已停止的容器）；已移除容器及“未归属（历史）”的用量放在默认折叠的“历史用量记录”中，不计入当前容器数量。顶部累计统计与趋势仍包含选定区间的历史记录。点击卡片进入详情，查看趋势及逐次请求日志；支持日期范围、API / 授权类型、供应商和模型筛选。关闭统计页可继续当前终端。
+
+在“设置 → API 供应商 → 新增 / 编辑”中填写定价，单位为 **美元 / 百万 token**。分别填写输入、输出、缓存读取、缓存写入价格；留空为 0。可添加模型 ID 对应的价格，精确匹配优先，否则使用供应商默认价格。授权模式费用为 0，API 成本是按填写价格估算的用量成本，不能代替供应商账单。
+
+- 成本 =（输入 token × 输入价格 + 输出 token × 输出价格 + 缓存读取 token × 缓存读取价格 + 缓存写入 token × 缓存写入价格）÷ 1,000,000。
+- 总 token 是以上四类之和；缓存命中率 = 缓存读取 ÷（输入 + 缓存读取 + 缓存写入），按总 token 加权。没有输入 token 时显示无数据。
+- 日志中的输入、输出是 token 数量。统计仅保存请求元数据，不保存提示词、回答正文或凭据。
+- 容器归属按容器独立的输入历史与会话请求链核对，同一会话跨容器继续时按具体轮次分别统计。共享会话文件不会在多个容器重复计数；有可靠证据的旧错归属记录会追加更正，保留原始账本。来源缺失或冲突的记录保留为“未归属（历史）”。已确认容器但缺少当时供应商快照的记录计入该容器 token，估算费用为 0。
+- 桌面端自带最新采集脚本，在已有运行容器内只读执行，刷新用量即可采用新逻辑，无需重建容器或中断 Claude 会话。
+- 使用容器默认供应商设置启动 Claude 时保存供应商、模式、价格快照；显式传入 `--settings` 的进程使用指定设置，不切换托管快照。保存定价后，统计按每条请求原有供应商的当前价格重算已有请求的估算费用，无需重启容器或 Claude。总览、趋势、卡片与日志采用同一价格；原始账本不改写。已删除供应商沿用请求保存的价格，授权与未归属历史仍按 0 计算。
+- 速度单位为输出 token/秒；源记录缺少可靠请求耗时则显示“—”，不会用两次请求之间的间隔推算。
+
+## 10. 测试命令
+
+```bash
+npm run test:docker                          # 容器侧脚本（statusline / 排序 / portwatch / 代理状态与兜底规则 / 换行）
+npm test                                     # 前端纯逻辑
+npm run typecheck
+cargo test  --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```

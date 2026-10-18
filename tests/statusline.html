@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude 状态栏 · Stitch 优化预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 40px 32px; background: #0d1015; color: #e6edf3; font: 14px/1.6 'Segoe UI', 'Microsoft YaHei UI', sans-serif; }
+    main { max-width: 1160px; margin: auto; }
+    .eyebrow { color: #60cdff; font-size: 11px; letter-spacing: .14em; margin: 0 0 8px; }
+    h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -.02em; }
+    .intro { color: #8b949e; margin: 8px 0 24px; }
+    .toolbar { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 18px; }
+    .states { display: flex; flex-wrap: wrap; gap: 6px; }
+    button, select { background: #161c24; color: #aab4c2; border: 1px solid #2a3442; padding: 7px 12px; font: inherit; border-radius: 5px; cursor: pointer; }
+    button[aria-pressed=true] { color: #96dfff; background: #1b2b38; border-color: #42677c; }
+    button:hover, select:hover { border-color: #62778c; }
+    button:focus-visible, select:focus-visible { outline: 2px solid #60cdff; outline-offset: 3px; }
+    .width-control { display: flex; align-items: center; gap: 10px; color: #8b949e; font-size: 12px; }
+    .preview { border: 1px solid #2a313d; border-radius: 8px; overflow: hidden; background: #121317; }
+    .preview-header { display: flex; align-items: center; justify-content: space-between; background: #171b23; border-bottom: 1px solid #272e39; padding: 10px 18px; color: #aab4c2; font-size: 12px; }
+    .preview-header span:last-child { color: #717e90; }
+    .terminal-padding { padding: 18px 20px 0; }
+    #terminal { width: 100%; height: 242px; }
+    .notes { display: flex; gap: 16px; justify-content: space-between; flex-wrap: wrap; margin-top: 14px; color: #8b949e; font-size: 12px; }
+    .notes p { margin: 0; }
+    a { color: #8db5c9; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (max-width: 620px) { body { padding: 24px 16px; } .terminal-padding { padding: 12px 10px 0; } #terminal { height: 280px; } h1 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">CLAUDE CODE / STATUSLINE</p>
+    <h1>终端状态栏</h1>
+    <p class="intro">优先单行展示，空间不足时自动换行。当前文件夹以橙色标识。</p>
+    <div class="toolbar">
+      <div class="states" aria-label="上下文状态">
+        <button id="standard" aria-pressed="true">绿色 · 20%</button>
+        <button id="warning" aria-pressed="false">橙色 · 40%</button>
+        <button id="elevated" aria-pressed="false">紫色 · 60%</button>
+        <button id="full" aria-pressed="false">红色 · 92%</button>
+        <button id="unknown" aria-pressed="false">暂无数据</button>
+        <button id="small" aria-pressed="false">200K · 思考关闭</button>
+      </div>
+      <label class="width-control">终端宽度
+        <select id="width"><option value="0">自适应</option><option value="80">80 列</option><option value="48">48 列</option></select>
+      </label>
+    </div>
+    <section class="preview" aria-label="终端效果预览">
+      <div class="preview-header"><span>claude-01 / Claude Code</span><span>实际渲染 · 合成数据</span></div>
+      <div class="terminal-padding"><div id="terminal"></div></div>
+    </section>
+    <div class="notes">
+      <p id="dimensions"></p>
+      <a href="../docs/designs/statusline-stitch.md" target="_blank" rel="noreferrer">查看状态栏设计说明 ↗</a>
+      <p>底部 plan mode 和快捷键提示由 Claude 自身提供。</p>
+    </div>
+  </main>
+  <script type="module" src="./statusline.js"></script>
+</body>
+</html>

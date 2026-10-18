@@ -1,0 +1,99 @@
+# =============================================================================
+# tdc —— Claude 多容器部署方案（无桌面端时的命令行部署；桌面端创建的容器参数与此等价）
+#
+# 端口约定：宿主端口 = 容器端口 + 10 × 槽位号（01 → +10，02 → +20），只绑定 127.0.0.1 防止局域网暴露；
+#           冲突时在 .env 中覆盖。桌面端分配器使用同一规则，冲突时自动 +1 顺延。
+# 卷策略：
+#   home-XX          每容器独立：凭证、.claude.json、settings、todos 等（CLAUDE_CONFIG_DIR）
+#   shared-projects  所有容器共享：会话 JSONL → 支撑额度耗尽后跨容器 --resume
+#   shared-memory    所有容器共享：CLAUDE.md / skills / commands / agents（entrypoint 自动链接）
+#   源码目录         所有容器挂到同一容器路径，保证切换后 cwd 一致（Claude 按 cwd 归档会话）
+#   状态文件         quota.json / ports.json / sessions/*.json 位于 home 卷内 /home/node/.claude/tdc/state，
+#                    宿主机通过 `docker exec -u node <容器> tdc-ctl snapshot` 读取（避免 Windows 路径 bind mount 的权限与延迟问题）
+# 代理能力：cap_add NET_ADMIN + /dev/net/tun + 关闭 IPv6（容器内 mihomo TUN 与兜底规则需要，创建后不可更改）。
+#           镜像入口以 root 运行并降权为 node，docker exec 必须带 -u node（代理控制命令带 -u root）。
+#
+# 用法：
+#   cp .env.example .env && docker compose up -d --build
+#   docker exec -u node -it claude-dev-01 tdc-session main /workspace/app claude   # 首次进入并登录 claude
+#   ./scripts/tdc-quota.sh                                     # 查看全部容器额度
+# =============================================================================
+name: tdc
+
+x-claude-common: &claude-common
+  image: tdc/claude-dev:${TDC_IMAGE_TAG:-latest}
+  build:
+    context: .
+    args:
+      CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.300}
+  restart: unless-stopped
+  cpus: ${TDC_CPUS:-4}
+  mem_limit: ${TDC_MEMORY:-8g}
+  working_dir: /workspace/${PROJECT_NAME:-app}
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  sysctls:
+    net.ipv6.conf.all.disable_ipv6: 1
+    net.ipv6.conf.default.disable_ipv6: 1
+
+x-claude-env: &claude-env
+  TERM: xterm-256color
+  COLORTERM: truecolor
+  TZ: ${TZ:-Asia/Shanghai}
+
+services:
+  claude-dev-01:
+    <<: *claude-common
+    container_name: claude-dev-01
+    hostname: claude-dev-01
+    environment:
+      <<: *claude-env
+      TDC_CONTAINER_NAME: claude-dev-01
+    labels:
+      tdc.managed: "true"
+      tdc.slot: "01"
+      tdc.auth_mode: subscription
+      tdc.shared_group: default
+    ports:
+      - "127.0.0.1:${DEV01_PORT_3000:-3010}:3000"
+      - "127.0.0.1:${DEV01_PORT_5173:-5183}:5173"
+      - "127.0.0.1:${DEV01_PORT_8080:-8090}:8080"
+    volumes:
+      - home-01:/home/node/.claude
+      - shared-projects:/home/node/.claude/projects
+      - shared-memory:/home/node/.claude-shared
+      - ${PROJECT_DIR:-./workspace}:/workspace/${PROJECT_NAME:-app}
+
+  claude-dev-02:
+    <<: *claude-common
+    container_name: claude-dev-02
+    hostname: claude-dev-02
+    environment:
+      <<: *claude-env
+      TDC_CONTAINER_NAME: claude-dev-02
+    labels:
+      tdc.managed: "true"
+      tdc.slot: "02"
+      tdc.auth_mode: subscription
+      tdc.shared_group: default
+    ports:
+      - "127.0.0.1:${DEV02_PORT_3000:-3020}:3000"
+      - "127.0.0.1:${DEV02_PORT_5173:-5193}:5173"
+      - "127.0.0.1:${DEV02_PORT_8080:-8100}:8080"
+    volumes:
+      - home-02:/home/node/.claude
+      - shared-projects:/home/node/.claude/projects
+      - shared-memory:/home/node/.claude-shared
+      - ${PROJECT_DIR:-./workspace}:/workspace/${PROJECT_NAME:-app}
+
+volumes:
+  home-01:
+    name: tdc_home_claude-dev-01
+  home-02:
+    name: tdc_home_claude-dev-02
+  shared-projects:
+    name: tdc_shared_projects
+  shared-memory:
+    name: tdc_shared_memory

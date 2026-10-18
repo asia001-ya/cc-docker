@@ -1,0 +1,10 @@
+# 源码统一使用 LF，避免 Windows 导入时将 CRLF 写入仓库。
+* text=auto eol=lf
+
+# 容器内脚本必须保持 LF，否则在 Linux 中报 /bin/bash^M
+*.sh text eol=lf
+*.mjs text eol=lf
+tmux.conf text eol=lf
+Dockerfile text eol=lf
+*.json text eol=lf
+docker/tests/fixtures/** text eol=lf

@@ -1,0 +1,14 @@
+{
+  "session_id": "7d1f3c2a-1111-4c2b-9a77-0123456789ab",
+  "transcript_path": "/home/node/.claude/projects/-workspace-app/7d1f3c2a-1111-4c2b-9a77-0123456789ab.jsonl",
+  "cwd": "/workspace/app",
+  "version": "2.1.300",
+  "model": { "id": "claude-opus-5-5", "display_name": "Opus 5.5" },
+  "workspace": { "current_dir": "/workspace/app/src", "project_dir": "/workspace/app" },
+  "context_window": { "context_window_size": 200000, "used_percentage": 12.34 },
+  "cost": { "total_cost_usd": 0.42 },
+  "rate_limits": {
+    "five_hour": { "used_percentage": 15.25, "resets_at": 1792130400 },
+    "seven_day": { "used_percentage": 40, "resets_at": 1792562400 }
+  }
+}
