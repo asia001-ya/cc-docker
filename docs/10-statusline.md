@@ -30,8 +30,6 @@
 
 长值按终端显示列截断，并过滤控制序列；列宽计算保留空格，兼顾中文和 emoji。状态栏每五秒刷新，也响应 Claude 原有更新事件。额度信息继续写入 `quota.json`，供桌面底部额度栏使用；用户配置 `TDC_STATUSLINE_CHAIN` 时，仍优先展示自定义输出。
 
-视觉方案来自 Stitch 状态栏设计，详见 [设计落地记录](designs/statusline-stitch.md)。
-
 ## 更新与验证
 
 新脚本及依赖登记在应用内置镜像上下文与 `docker/.dockerignore`。已有容器可在不重启 Claude 的情况下更新：

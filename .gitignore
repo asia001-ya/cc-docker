@@ -84,7 +84,26 @@ known_hosts*
 .DS_Store
 Thumbs.db
 
-# Local screenshots/design exports can contain account or proxy details.
+# Keep design/prototype/planning documents local; publish usage documentation.
+/docs/01-ui-prototype.md
+/docs/02-architecture.md
+/docs/05-feasibility.md
+/docs/design/
+/docs/designs/
+/docs/prototypes/
+/docs/plans/
+/docs/specs/
+/docs/superpowers/
+/docs/**/*-design.md
+/docs/**/*-prototype.md
+
+# Only these reviewed demo screenshots are published in the README.
+/docs/images/*
+!/docs/images/main-terminal.png
+!/docs/images/container-sidebar.png
+!/docs/images/quota-overview.png
+
+# Other local screenshots/design exports can contain private details.
 /docs/screenshots/
 /stitch_claude/
 *.zip
