@@ -1,35 +1,17 @@
 /**
  * 额度浮层（极简挂件）：从状态栏弹出，列出全部容器的 5h / 周额度、重置倒计时、端口，并可一键切换。
  */
+import { useState } from "react";
+import { containerQuotaRefresh, errorText, isTauri } from "../../api/commands";
 import { useFleetStore } from "../../store/fleetStore";
 import { useActiveSession } from "../../store/tabStore";
 import { useUiStore } from "../../store/uiStore";
-import { colorForRemaining, formatCountdown, freshness, HEALTH_LABEL, windowRemaining } from "../../lib/quota";
-import type { FleetEntry, QuotaWindow } from "../../api/types";
-import { Icon, IconButton, ProgressBar, StatusDot } from "../ui/controls";
+import { freshness, HEALTH_LABEL } from "../../lib/quota";
+import type { FleetEntry } from "../../api/types";
+import { Icon, IconButton, StatusDot } from "../ui/controls";
+import { QuotaWindowRow as WindowRow } from "./QuotaWindowRow";
 import { openInPreview } from "../terminal/previewActions";
 import { useNow } from "./StatusBar";
-
-/**
- * 单窗口进度行。
- * @param props label、win、now
- * @returns JSX
- */
-function WindowRow({ label, win, now }: { label: string; win: QuotaWindow | null | undefined; now: number }) {
-  const q = useUiStore((s) => s.settings.quota);
-  const r = windowRemaining(win, now);
-  const color = r ? colorForRemaining(r.pct, q.warnThreshold, q.criticalThreshold) : "#8A8886";
-  return (
-    <div className="grid grid-cols-[28px_1fr_42px_74px] items-center gap-2 font-mono text-code-sm">
-      <span className="text-on-surface-variant">{label}</span>
-      <ProgressBar pct={r?.pct ?? 0} color={color} height={5} />
-      <span className="text-right font-semibold" style={{ color }}>
-        {r ? `${Math.round(r.pct)}%` : "—"}
-      </span>
-      <span className="truncate text-outline">{r?.inferred ? "已重置*" : win?.resets_at ? formatCountdown(win.resets_at, now) : ""}</span>
-    </div>
-  );
-}
 
 /**
  * 单容器卡片。
@@ -38,6 +20,28 @@ function WindowRow({ label, win, now }: { label: string; win: QuotaWindow | null
  */
 function Row({ entry, current, onSwitch }: { entry: FleetEntry; current: boolean; onSwitch: (target: string) => void }) {
   const now = useNow();
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const toast = useUiStore((s) => s.toast);
+  const isApi = (entry.provider?.mode ?? entry.container.authMode) === "api";
+  const refresh = async () => {
+    if (!isTauri()) return toast("info", "演示模式：未连接后端");
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const refreshed = await containerQuotaRefresh(entry.container.name);
+      useFleetStore.setState((s) => ({ fleet: { ...s.fleet, entries: s.fleet.entries.map((item) =>
+        item.container.id === refreshed.container.id ? { ...item, quota: refreshed.quota,
+          remaining: refreshed.remaining, health: refreshed.health,
+          blockedUntil: refreshed.blockedUntil, limitHit: refreshed.limitHit } : item,
+      ) } }));
+      toast("success", "额度已刷新");
+    } catch (error) {
+      setRefreshError(errorText(error));
+    } finally {
+      setRefreshing(false);
+    }
+  };
   return (
     <div className={`flex flex-col gap-1.5 rounded-lg border p-2.5 ${current ? "border-accent/40 bg-accent/[0.08]" : "border-white/[0.06] bg-white/[0.03]"}`}>
       <div className="flex items-center justify-between gap-2">
@@ -48,6 +52,10 @@ function Row({ entry, current, onSwitch }: { entry: FleetEntry; current: boolean
         </span>
         <span className="flex items-center gap-1">
           <span className="font-ui text-label-sm text-on-surface-variant">{HEALTH_LABEL[entry.health]}</span>
+          {!isApi && <IconButton icon={refreshing ? "progress_activity" : "refresh"}
+            title={entry.container.running ? "刷新账号额度" : "请先启动容器再刷新额度"}
+            disabled={refreshing || !entry.container.running} onClick={() => void refresh()}
+            className={refreshing ? "[&>span]:animate-spin" : "disabled:opacity-40"} />}
           {!current && entry.container.running && entry.health !== "exhausted" && (
             <button
               type="button"
@@ -60,7 +68,8 @@ function Row({ entry, current, onSwitch }: { entry: FleetEntry; current: boolean
           )}
         </span>
       </div>
-      {entry.health === "api" ? (
+      {refreshError && <p role="alert" className="font-ui text-body-sm text-st-bad">{refreshError}</p>}
+      {isApi ? (
         <div className="font-ui text-body-sm text-on-surface-variant">
           按量计费 · {entry.provider?.base_url ?? "官方 API"} · {entry.provider?.model ?? "默认模型"}
         </div>
@@ -68,7 +77,7 @@ function Row({ entry, current, onSwitch }: { entry: FleetEntry; current: boolean
         <div className="font-ui text-body-sm text-outline">容器未运行</div>
       ) : (
         <>
-          <WindowRow label="5h" win={entry.quota?.five_hour} now={now} />
+          <WindowRow label="5小时" win={entry.quota?.five_hour} now={now} />
           <WindowRow label="周" win={entry.quota?.seven_day} now={now} />
           <div className="flex items-center justify-between font-ui text-label-sm text-outline">
             <span className="truncate">{entry.account?.email ?? "未读取到账号"}</span>
@@ -142,7 +151,7 @@ export function QuotaFlyout({ onSwitch }: { onSwitch: (target: string | null) =>
           ))}
         </div>
         <footer className="border-t border-white/[0.06] px-3 py-1.5 font-ui text-label-sm text-outline">
-          额度数据来自容器内 Claude Code 的 statusline，仅在 claude 运行时刷新；* 表示重置时间已过、推断为已恢复。
+          显示账号剩余额度，多个会话共用同一限额；刷新按钮查询最新账号额度。* 表示重置时间已过、待刷新确认。
         </footer>
       </div>
     </>

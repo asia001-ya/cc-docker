@@ -20,7 +20,7 @@ import { mergeBuiltinModelPricing, modelPriceDrafts, parseModelPrices, parsePric
 import { discardWallpaper } from "../../lib/wallpaper";
 import { Button, Callout, Field, Icon, Input, Kbd, Section, Select, Switch } from "../ui/controls";
 
-type TabId = "appearance" | "wallpaper" | "docker" | "quota" | "providers" | "proxy" | "shortcuts";
+type TabId = "appearance" | "wallpaper" | "docker" | "quota" | "providers" | "pricing" | "proxy" | "shortcuts";
 
 /** 自带增删改、不走底部"保存"的分页 */
 const SELF_MANAGED_TABS: TabId[] = ["providers", "proxy"];
@@ -31,6 +31,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "docker", label: "Docker 引擎", icon: "deployed_code" },
   { id: "quota", label: "额度与切换", icon: "speed" },
   { id: "providers", label: "API 供应商", icon: "api" },
+  { id: "pricing", label: "默认定价", icon: "payments" },
   { id: "proxy", label: "代理节点", icon: "vpn_lock" },
   { id: "shortcuts", label: "快捷键", icon: "keyboard" },
 ];
@@ -261,6 +262,8 @@ export function SettingsModal({ tab: initialTab }: { tab?: TabId }) {
   const setSaved = useUiStore((s) => s.setSettings);
   const [tab, setTab] = useState<TabId>(initialTab ?? "appearance");
   const [draft, setDraft] = useState<Settings>(saved);
+  const [defaultPrice, setDefaultPrice] = useState(() => priceDraft(saved.defaultPricing.pricing));
+  const [defaultModels, setDefaultModels] = useState(() => modelPriceDrafts(saved.defaultPricing.modelPricing));
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [patternsText, setPatternsText] = useState(saved.quota.limitPatterns.join("\n"));
   const [importing, setImporting] = useState(false);
@@ -317,8 +320,11 @@ export function SettingsModal({ tab: initialTab }: { tab?: TabId }) {
     if (importPending.current || savePending.current) return;
     savePending.current = true;
     setSaving(true);
-    const next: Settings = { ...draft, quota: { ...draft.quota, limitPatterns: patternsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) } };
     try {
+      const next: Settings = { ...draft,
+        defaultPricing: { pricing: parsePriceDraft(defaultPrice), modelPricing: parseModelPrices(defaultModels) },
+        quota: { ...draft.quota, limitPatterns: patternsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) },
+      };
       if (isTauri()) await settingsSet(next);
       setSaved(next);
       useUiStore.getState().setWallpaperPreview(null);
@@ -512,6 +518,8 @@ export function SettingsModal({ tab: initialTab }: { tab?: TabId }) {
           )}
 
           {tab === "providers" && <ProvidersPane />}
+          {tab === "pricing" && <PricingEditor scope="authorization"
+            pricing={defaultPrice} onPricing={setDefaultPrice} models={defaultModels} onModels={setDefaultModels} />}
 
           {tab === "proxy" && <ProxyNodesPane />}
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageCollectionContainer, UsageContainerSummary } from "../api/types";
-import { partitionUsageContainers } from "./usage";
+import { displayUsageTrend, partitionUsageContainers, ZERO_USAGE } from "./usage";
 
 function summary(container: string, status: UsageCollectionContainer["status"], requests = 1): UsageContainerSummary {
   return Object.freeze({
@@ -84,5 +84,43 @@ describe("用量卡片区分现存容器与历史记录", () => {
     expect(partitionUsageContainers([unattributed], new Set([unattributed.container]))).toEqual({
       current: [], historical: [unattributed], unconfirmed: [],
     });
+  });
+});
+
+describe("趋势按选定天或小时展示", () => {
+  it("小时边界使用查询时区并补齐空小时，结束时间不额外多算一小时", () => {
+    const from = Date.UTC(2026, 9, 18, 16) / 1000;
+    const metrics = { ...ZERO_USAGE, requests: 2, totalTokens: 45, costUsd: 0.5 };
+    const trend = displayUsageTrend([{ date: "2026-10-19T01:00", metrics }], {
+      from, to: from + 3 * 3600, utcOffsetMinutes: 480, granularity: "hour",
+    });
+    expect(trend.granularity).toBe("hour");
+    expect(trend.points.map((point) => point.date)).toEqual(["2026-10-19T00:00", "2026-10-19T01:00", "2026-10-19T02:00"]);
+    expect(trend.points.map((point) => point.metrics.requests)).toEqual([0, 2, 0]);
+    expect(trend.points.reduce((sum, point) => sum + point.metrics.costUsd, 0)).toBe(0.5);
+  });
+
+  it("较长日期范围仍保留用户选择的天粒度", () => {
+    const from = Date.UTC(2026, 0, 1) / 1000;
+    const trend = displayUsageTrend([{ date: "2026-01-05", metrics: { ...ZERO_USAGE, requests: 1 } }], {
+      from, to: from + 90 * 86400, granularity: "day",
+    });
+    expect(trend.granularity).toBe("day");
+    expect(trend.points).toHaveLength(90);
+    expect(trend.points[4].metrics.requests).toBe(1);
+    expect(trend.points.at(-1)?.date).toBe("2026-03-31");
+  });
+
+  it("多年小时数据不改变粒度或丢失有用量的数据点", () => {
+    const from = Date.UTC(2020, 0, 1) / 1000;
+    const to = Date.UTC(2026, 0, 1) / 1000;
+    const points = [
+      { date: "2020-01-02T00:00", metrics: { ...ZERO_USAGE, totalTokens: 10 } },
+      { date: "2025-12-31T10:00", metrics: { ...ZERO_USAGE, totalTokens: 15 } },
+    ];
+    const trend = displayUsageTrend(points, { from, to, granularity: "hour" });
+    expect(trend.points.length).toBeLessThan(12);
+    expect(trend.points.reduce((sum, point) => sum + point.metrics.totalTokens, 0)).toBe(25);
+    expect(trend.points.find((point) => point.date === "2025-12-31T10:00")?.metrics.totalTokens).toBe(15);
   });
 });

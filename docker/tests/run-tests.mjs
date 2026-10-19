@@ -208,19 +208,19 @@ test("proxy-guard：兜底规则序列（默认禁止局域网 / 放行局域网
   };
   const strict = run();
   const v4 = strict.filter((l) => l.startsWith("iptables "));
-  assert.equal(v4[0], "iptables -A TDC_GUARD -o lo -d 127.0.0.11 -m owner ! --uid-owner 0 -j REJECT", "Docker 内嵌 DNS 必须先于 lo 放行被拒绝");
-  assert.ok(v4.includes("iptables -A TDC_GUARD -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j RETURN"), "只放行回包方向");
+  assert.equal(v4[0], "iptables -A TDC_GUARD -d 127.0.0.11/32 -o lo -m owner ! --uid-owner 0 -j REJECT --reject-with icmp-port-unreachable", "Docker 内嵌 DNS 必须先于 lo 放行被拒绝");
+  assert.ok(v4.includes("iptables -A TDC_GUARD -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j RETURN"), "只放行回包方向");
   assert.ok(v4.includes("iptables -A TDC_GUARD -o tdc0 -j RETURN"));
   assert.ok(v4.includes("iptables -A TDC_GUARD -m owner --uid-owner 0 -j RETURN"));
-  assert.equal(v4.at(-1), "iptables -A TDC_GUARD -j REJECT", "末条必须是拒绝");
+  assert.equal(v4.at(-1), "iptables -A TDC_GUARD -j REJECT --reject-with icmp-port-unreachable", "末条必须是拒绝");
   assert.ok(!v4.some((l) => l.includes("192.168.0.0/16")), "默认不放行局域网");
   assert.ok(strict.some((l) => l.startsWith("ip6tables ")), "IPv6 也有兜底");
 
   const lan = run("--allow-lan").filter((l) => l.startsWith("iptables "));
   const idx = (needle) => lan.findIndex((l) => l.includes(needle));
-  assert.ok(idx("-d 192.168.0.0/16 -p udp --dport 53 -j REJECT") >= 0);
-  assert.ok(idx("-d 192.168.0.0/16 -j RETURN") > idx("-d 192.168.0.0/16 -p udp --dport 53 -j REJECT"), "53 端口拒绝必须在网段放行之前");
-  assert.equal(lan.at(-1), "iptables -A TDC_GUARD -j REJECT");
+  assert.ok(idx("-d 192.168.0.0/16 -p udp -m udp --dport 53 -j REJECT") >= 0);
+  assert.ok(idx("-d 192.168.0.0/16 -j RETURN") > idx("-d 192.168.0.0/16 -p udp -m udp --dport 53 -j REJECT"), "53 端口拒绝必须在网段放行之前");
+  assert.equal(lan.at(-1), "iptables -A TDC_GUARD -j REJECT --reject-with icmp-port-unreachable");
 });
 
 test("tdc-proxy：非 root 执行时拒绝并输出 JSON", { skip: (findBash() === null || process.platform === "win32") && "需要 Linux bash" }, () => {

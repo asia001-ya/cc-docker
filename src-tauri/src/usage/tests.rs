@@ -142,7 +142,7 @@ fn 再次保存定价立即重算且始终使用请求原供应商() {
 }
 
 #[test]
-fn 零价模型覆盖默认且授权历史与缺少供应商保留原规则() {
+fn 零价模型覆盖默认且未知模型授权采用默认回退价格() {
     let fixture = Fixture::new();
     let store = fixture.store();
     let providers = ProviderStore::load(&fixture.0).unwrap();
@@ -174,6 +174,7 @@ fn 零价模型覆盖默认且授权历史与缺少供应商保留原规则() {
         assert_eq!(log.record.pricing, deleted.pricing);
         assert_cost(log.cost_usd, 0.001215);
     }
+    authorization.pricing = TokenPricing::default();
     assert_eq!(result.logs.iter().find(|log| log.record.id == "authorization").unwrap().record, authorization);
     let historical = &result.logs.iter().find(|log| log.record.id == "historical").unwrap().record;
     assert_eq!(historical.container, "未归属（历史）");
@@ -308,13 +309,13 @@ fn tiered_capture(id: &str, input: u64, read: u64, write: u64) -> UsageRecord {
 }
 
 #[test]
-fn 价格按百万计算且授权和未知来源不计费() {
+fn 价格按百万计算且已知授权可估算而未知历史不计费() {
     let mut request = record("r");
     assert!((request.cost_usd() - 0.001215).abs() < 1e-12);
     assert_eq!(request.log().speed, Some(10.0));
     assert_eq!(request.total_tokens(), 1020);
     request.auth_type = "authorization".into();
-    assert_eq!(request.cost_usd(), 0.0);
+    assert_cost(request.cost_usd(), 0.001215);
     request.auth_type = "api".into();
     request.attribution = "historical".into();
     assert_eq!(request.cost_usd(), 0.0);
@@ -736,4 +737,94 @@ fn 不接受无证据却声明精确采集的记录() {
     let fixture = Fixture::new();
     assert!(fixture.store().ingest(vec![invalid]).is_err());
     assert!(!fixture.0.join("usage/requests.jsonl").exists());
+}
+
+#[test]
+fn 授权默认定价重算历史费用并保留归属与原账本() {
+    use crate::providers::{DefaultPricing, ProviderPricingTable};
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let mut captured = record("subscription");
+    captured.auth_type = "authorization".into();
+    captured.provider_id = None;
+    captured.model = "claude-sonnet-4-6".into();
+    captured.pricing = TokenPricing::default();
+    let mut unknown = captured.clone();
+    unknown.id = "unknown".into();
+    unknown.attribution = "historical".into();
+    store.ingest(vec![captured.clone(), unknown]).unwrap();
+    let ledger = fixture.0.join("usage/requests.jsonl");
+    let before = std::fs::read(&ledger).unwrap();
+    let query = UsageQuery {
+        from: Some(captured.timestamp),
+        to: Some(captured.timestamp + 3600),
+        granularity: UsageGranularity::Hour,
+        ..Default::default()
+    };
+    let mut prices = DefaultPricing::default();
+    let first = store.query_with_default_pricing(&query, &ProviderPricingTable::new(), &prices.snapshot()).unwrap();
+    assert!(first.totals.cost_usd > 0.0);
+    prices
+        .model_pricing
+        .insert(captured.model.clone(), TokenPricing { input: 10.0, output: 20.0, cache_read: 1.0, cache_write: 12.0 });
+    let result = store.query_with_default_pricing(&query, &ProviderPricingTable::new(), &prices.snapshot()).unwrap();
+    assert_cost(result.totals.cost_usd, 0.0034);
+    assert_cost(result.trend[0].metrics.cost_usd, result.totals.cost_usd);
+    let log = result.logs.iter().find(|log| log.record.id == "subscription").unwrap();
+    assert_cost(log.cost_usd, result.totals.cost_usd);
+    assert_eq!(log.record.provider_id, None);
+    assert_eq!(log.record.auth_type, "authorization");
+    assert_eq!(result.logs.iter().find(|log| log.record.id == "unknown").unwrap().cost_usd, 0.0);
+    prices.model_pricing.insert(captured.model, TokenPricing::default());
+    assert_eq!(
+        store
+            .query_with_default_pricing(&query, &ProviderPricingTable::new(), &prices.snapshot())
+            .unwrap()
+            .totals
+            .cost_usd,
+        0.0
+    );
+    assert_eq!(std::fs::read(ledger).unwrap(), before);
+}
+
+#[test]
+fn 小时趋势采用本地时区半开区间且不受日志分页影响() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    // 2024-01-01 15:00 UTC = 23:00 UTC+8. Exercise both hour and day boundaries.
+    let from = 1_704_067_200 + 15 * 3600;
+    let times = [from - 1, from, from + 3599, from + 3600, from + 3 * 3600];
+    store
+        .ingest(
+            times
+                .into_iter()
+                .enumerate()
+                .map(|(i, timestamp)| {
+                    let mut value = record(&format!("hour-{i}"));
+                    value.timestamp = timestamp;
+                    value
+                })
+                .collect(),
+        )
+        .unwrap();
+    let query = UsageQuery {
+        from: Some(from),
+        to: Some(from + 3 * 3600),
+        utc_offset_minutes: Some(480),
+        granularity: UsageGranularity::Hour,
+        page_size: Some(1),
+        ..Default::default()
+    };
+    let hourly = store.query(&query).unwrap();
+    assert_eq!(hourly.logs.len(), 1);
+    assert_eq!(hourly.total_logs, 3);
+    assert_eq!(
+        hourly.trend.iter().map(|point| point.date.as_str()).collect::<Vec<_>>(),
+        ["2024-01-01T23:00", "2024-01-02T00:00", "2024-01-02T01:00"]
+    );
+    assert_eq!(hourly.trend.iter().map(|point| point.metrics.requests).collect::<Vec<_>>(), [2, 1, 0]);
+    let daily = store.query(&UsageQuery { granularity: UsageGranularity::Day, ..query }).unwrap();
+    assert_eq!(daily.trend.len(), 2);
+    assert_eq!(daily.totals.total_tokens, hourly.totals.total_tokens);
+    assert_cost(daily.totals.cost_usd, hourly.totals.cost_usd);
 }

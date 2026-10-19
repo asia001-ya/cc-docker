@@ -10,17 +10,20 @@ function PriceInputs({ value, onChange, prefix }: { value: PriceDraft; onChange:
   </div>;
 }
 
-export function PricingEditor({ pricing, onPricing, models, onModels }: {
+export function PricingEditor({ pricing, onPricing, models, onModels, scope = "provider" }: {
   pricing: PriceDraft; onPricing: (v: PriceDraft) => void;
   models: ModelPriceDraft[]; onModels: (v: ModelPriceDraft[]) => void;
+  scope?: "provider" | "authorization";
 }) {
   const builtinRows = models.map((row, index) => ({ row, index, builtin: row.builtinId ? BUILTIN_MODEL_PRICING.get(row.builtinId) : undefined })).filter(({ builtin }) => builtin);
   const customRows = models.map((row, index) => ({ row, index })).filter(({ row }) => !row.builtinId);
   const updatePrices = (index: number, prices: PriceDraft) => onModels(models.map((row, i) => i === index ? { ...row, prices } : row));
-  return <Section title="用量定价" icon="payments">
-    <p className="font-ui text-body-sm text-on-surface-variant">单位：美元 / 百万 token。留空按 0 计算，授权模式费用为 0。统计为估算成本，以供应商账单为准。</p>
+  return <Section title={scope === "authorization" ? "授权账号默认定价" : "用量定价"} icon="payments">
+    <p className="font-ui text-body-sm text-on-surface-variant">单位：美元 / 百万 token。留空按 0 计算。
+      {scope === "authorization" ? "授权账号按此价格估算等值 API 用量费用，不代表订阅实际扣费。保存后重算已有授权请求。" : "API 请求按所属供应商定价估算；授权账号使用设置中的默认定价。实际费用以账单为准。"}
+    </p>
     <div className="rounded-lg border border-accent/20 bg-accent/[0.05] p-3 font-ui text-body-sm text-on-surface-variant">
-      <p>已随工具内置 Claude 官方参考价，新安装和新增供应商自动补齐；已有供应商报价保留，可按实际账单修改。</p>
+      <p>已内置 Claude 官方参考价，可分别编辑各模型或恢复官方价；保存的自定义价格会保留。</p>
       <p className="mt-1">
         <a href={CLAUDE_PRICING_CATALOG.sourceUrl} target="_blank" rel="noreferrer" className="text-accent underline underline-offset-2" onClick={(e) => { e.preventDefault(); openExternal(CLAUDE_PRICING_CATALOG.sourceUrl); }}>Anthropic 官方定价</a>
         {` · 核对日期 ${CLAUDE_PRICING_CATALOG.checkedAt}`}

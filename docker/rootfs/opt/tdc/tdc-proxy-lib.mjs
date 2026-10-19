@@ -14,6 +14,7 @@
  *   node tdc-proxy-lib.mjs status     stdin 读原始事实 JSON，stdout 输出状态 JSON
  */
 import { pathToFileURL } from "node:url";
+import { lanCidrsFromIntent } from "./tdc-lan.mjs";
 
 /** 内核启动后允许 TUN 未就绪的宽限秒数 */
 export const STARTING_GRACE_SECS = 15;
@@ -71,16 +72,22 @@ export function buildStatus(raw) {
   const intent = r.intent && typeof r.intent === "object" ? r.intent : {};
   const core = r.core && typeof r.core === "object" ? r.core : {};
   const enabled = intent.enabled === true;
+  let lanCidrs = [];
+  const lanWarnings = [];
+  if (intent.allow_lan === true) {
+    try { lanCidrs = lanCidrsFromIntent(intent); }
+    catch { lanWarnings.push("内网直连网段无效，请重新应用代理设置"); }
+  }
   const facts = {
     enabled,
-    guard: r.guard === true,
+    guard: r.guard === true && lanWarnings.length === 0,
     core_alive: core.alive === true,
     tun: r.tun === true,
     core_age: typeof core.age === "number" ? core.age : null,
   };
   const state = classify(facts);
   const providers = summarizeProviders(r.controller?.providers);
-  const warnings = Array.isArray(r.xray?.warnings) ? r.xray.warnings.filter((w) => typeof w === "string") : [];
+  const warnings = [...lanWarnings, ...(Array.isArray(r.xray?.warnings) ? r.xray.warnings.filter((w) => typeof w === "string") : [])];
   if (state === "ok") {
     for (const p of providers) if (p.count === 0) warnings.push(`订阅 ${p.name} 没有拉到任何节点`);
     const desired = typeof intent.selected === "string" ? intent.selected : null;
@@ -93,6 +100,7 @@ export function buildStatus(raw) {
     state,
     enabled,
     allow_lan: intent.allow_lan === true,
+    lan_cidrs: lanCidrs,
     guard: facts.guard,
     tun: facts.tun,
     core_pid: facts.core_alive && Number.isInteger(core.pid) ? core.pid : null,

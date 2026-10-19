@@ -53,10 +53,71 @@ pub fn fleet_refresh(state: State<'_, AppState>) {
     state.wake.notify_one();
 }
 
+#[tauri::command]
+pub async fn container_quota_refresh(
+    state: State<'_, AppState>,
+    name: String,
+) -> AppResult<crate::quota::poller::FleetEntry> {
+    let (id, quota) = crate::quota::runtime::refresh(&state.docker()?, &name).await?;
+    let settings = state.config.settings().quota;
+    let result = {
+        let mut poller = state.poller.lock();
+        let entry = poller
+            .fleet
+            .entries
+            .iter_mut()
+            .find(|entry| entry.container.id == id)
+            .ok_or_else(|| AppError::Invalid("容器列表已变化，请刷新列表后重试".into()))?;
+        entry.update_quota(quota, crate::quota::poller::now_secs(), &settings);
+        let result = entry.clone();
+        poller.limit_hits.remove(&name);
+        result
+    };
+    state.wake.notify_one();
+    Ok(result)
+}
+
 /// 列出容器。参数：state——全局状态；include_unmanaged——是否包含非 tdc 容器；返回：容器列表。
 #[tauri::command]
 pub async fn container_list(state: State<'_, AppState>, include_unmanaged: bool) -> AppResult<Vec<ContainerInfo>> {
     state.docker()?.list(include_unmanaged).await
+}
+
+#[tauri::command]
+pub async fn container_directories(
+    state: State<'_, AppState>,
+    name: String,
+    path: String,
+) -> AppResult<serde_json::Value> {
+    if !path.starts_with('/') || path.contains('\0') || path.len() > 4096 {
+        return Err(AppError::Invalid("请输入容器内的绝对路径".into()));
+    }
+    let docker = state.docker()?;
+    let info = docker.get(&name).await?;
+    if !info.running {
+        return Err(AppError::Invalid("请先启动目标容器".into()));
+    }
+    let output = docker
+        .exec(
+            &info.id,
+            &[
+                "node",
+                "--input-type=module",
+                "-e",
+                include_str!("container_directories.mjs"),
+                "--",
+                "--tdc-list-directories",
+                &path,
+            ],
+            None,
+        )
+        .await?;
+    let value: serde_json::Value =
+        serde_json::from_str(output.stdout.trim()).map_err(|_| AppError::Other("目录列表读取失败".into()))?;
+    if output.exit_code != Some(0) || value["ok"] != true {
+        return Err(AppError::Invalid(value["error"].as_str().unwrap_or("目录列表读取失败").into()));
+    }
+    Ok(value)
 }
 
 /// 新建容器表单的默认值与预检结果。
@@ -338,21 +399,31 @@ pub async fn container_action(state: State<'_, AppState>, name: String, action: 
 /// 代理配置在启动前推送（订阅地址可能已更换），entrypoint 据此在任何用户进程之前施加兜底；
 /// 推送失败时容器仍启动（容器层保留着上次的配置），错误在启动后报告给前端。
 /// 参数：state——全局状态；docker——客户端；name——容器名；返回：成功与否。
-async fn start_with_config(state: &AppState, docker: &DockerClient, name: &str) -> AppResult<()> {
+pub(super) async fn start_with_config(state: &AppState, docker: &DockerClient, name: &str) -> AppResult<()> {
     let pushed = push_proxy_files(state, docker, name).await;
     // Apply both settings snapshots while the container is stopped.  A
     // pending snapshot belongs to a still-running Claude process and is only
     // promoted by tdc-claude.sh at the next process boundary.
-    let provider_id = state.providers.binding_of(name);
-    let provider_body = state.providers.render_settings(provider_id.as_deref())?;
-    docker.write_file(name, PROVIDER_FILE, &provider_body, 0o600).await?;
-    let usage_body = state.providers.render_usage_settings(provider_id.as_deref())?;
-    write_usage_snapshot(docker, name, &usage_body, false).await?;
+    sync_provider_files(&state.providers, docker, name, false).await?;
     docker.start(name).await?;
     super::host_config_cmds::verify_configured_start(docker, name).await.map_err(|error| {
         AppError::Other(format!("容器已启动，但宿主配置初始化失败：{error}。容器和数据已保留，请修正配置后重试"))
     })?;
     pushed.map(|_| ()).map_err(|e| AppError::Other(format!("容器已启动，但代理配置更新失败（沿用上次配置）：{e}")))
+}
+
+/// 普通启动与热切换共用：新 Claude 进程启动前同步当前供应商及待激活用量快照。
+pub(super) async fn sync_provider_files(
+    providers: &crate::providers::ProviderStore,
+    docker: &DockerClient,
+    name: &str,
+    running: bool,
+) -> AppResult<()> {
+    let provider_id = providers.binding_of(name);
+    let provider_body = providers.render_settings(provider_id.as_deref())?;
+    let usage_body = providers.render_usage_settings(provider_id.as_deref())?;
+    docker.write_file(name, PROVIDER_FILE, &provider_body, 0o600).await?;
+    write_usage_snapshot(docker, name, &usage_body, running).await
 }
 
 /// 删除容器（危险操作，前端需二次输入容器名确认）。

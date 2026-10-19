@@ -13,6 +13,7 @@ import { parseEnvLines } from "../../lib/validators";
 import { buildSessionHistory, deriveHistorySelection } from "../../lib/sessionHistory";
 import { buildSessionLaunchArgs, type SessionLaunch } from "../../lib/sessionLaunch";
 import { Modal } from "../ui/Modal";
+import { ContainerDirectoryPicker } from "./ContainerDirectoryPicker";
 import { Button, CardRadio, Field, Input, Select, Switch, TextArea } from "../ui/controls";
 
 /** 新建会话参数 */
@@ -60,6 +61,7 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
   const [titleEdited, setTitleEdited] = useState(false);
   const [cwd, setCwd] = useState(mountDirs[0]);
   const [cwdEdited, setCwdEdited] = useState(false);
+  const [choosingDirectory, setChoosingDirectory] = useState(false);
   const [launch, setLaunch] = useState<SessionLaunch>("claude");
   const [yolo, setYolo] = useState(false);
   const [resumeId, setResumeId] = useState("");
@@ -190,9 +192,12 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
             </Select>
           </Field>
         </div>
-        <Field label="初始工作目录" hint="下拉为该容器的项目挂载点；也可手动输入容器内路径">
+        <Field label="初始工作目录" hint="选择自定义可浏览容器目录；也可手动输入容器内路径">
           <div className="flex gap-1.5">
-            <Select className="!w-56" value={mountDirs.includes(cwd) ? cwd : ""} onChange={(e) => { if (e.target.value) { setCwd(e.target.value); setCwdEdited(true); } }}>
+            <Select className="!w-56" value={mountDirs.includes(cwd) ? cwd : ""} onChange={(e) => {
+              if (e.target.value) { setCwd(e.target.value); setCwdEdited(true); }
+              else setChoosingDirectory(true);
+            }}>
               {mountDirs.map((d) => (
                 <option key={d} value={d}>
                   {d}
@@ -200,7 +205,8 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
               ))}
               <option value="">自定义…</option>
             </Select>
-            <Input mono value={cwd} onChange={(e) => { setCwd(e.target.value); setCwdEdited(true); }} />
+            <Input mono className="min-w-0 flex-1" value={cwd} onChange={(e) => { setCwd(e.target.value); setCwdEdited(true); }} />
+            <Button className="shrink-0 whitespace-nowrap" icon="folder_open" title="浏览容器目录" disabled={!target || busy} onClick={() => setChoosingDirectory(true)}>浏览</Button>
           </div>
         </Field>
         <Field label="启动命令">
@@ -279,6 +285,9 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
           </div>
         </div>
       </div>
+      {choosingDirectory && <ContainerDirectoryPicker container={target} initialPath={cwd} shortcuts={mountDirs}
+        onClose={() => setChoosingDirectory(false)}
+        onSelect={(path) => { setCwd(path); setCwdEdited(true); setChoosingDirectory(false); }} />}
     </Modal>
   );
 }

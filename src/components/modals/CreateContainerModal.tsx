@@ -4,8 +4,7 @@
  * 导入：选择已有容器（无 tdc 标签的需要重建才能纳管，此处只做检测与提示）。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { ContainerInfo, CreateContainerRequest, PortMapping, Precheck, ProjectMount, ProviderView, ProxyNodeView } from "../../api/types";
+import type { ContainerInfo, CreateContainerRequest, PortMapping, Precheck, ProviderView, ProxyNodeView } from "../../api/types";
 import { containerCreate, containerDefaults, containerList, containerPrecheck, errorText, isTauri, providerList, proxyNodeList } from "../../api/commands";
 import { useUiStore } from "../../store/uiStore";
 import { useShallow } from "zustand/react/shallow";
@@ -16,9 +15,10 @@ import { ProxyBindingFields } from "./ProxyBindingFields";
 import { ProxyNodesPane } from "./ProxyNodesPane";
 import { ProxyPreflight } from "./ProxyPreflight";
 import { HostConfigFields } from "./HostConfigFields";
+import { ProjectMountFields } from "./ProjectMountFields";
 import { hasHostConfig, hostConfigErrors, normalizeHostConfig } from "../../lib/hostConfig";
 import { ImageBuildPanel } from "../shell/ImageBuildPanel";
-import { deriveContainerPath, isWindowsDrivePath, parseEnvLines, validateContainerName, validatePort } from "../../lib/validators";
+import { isWindowsDrivePath, parseEnvLines, validateContainerName, validatePort } from "../../lib/validators";
 import { Modal } from "../ui/Modal";
 import { containerRegionOptions, regionEnvErrors } from "../../lib/containerRegion";
 import { Button, Callout, CardRadio, Field, Icon, Input, Section, Select, Switch, TextArea } from "../ui/controls";
@@ -182,28 +182,6 @@ export function CreateContainerModal() {
       }
       return { ...f, ports };
     });
-
-  /**
-   * 更新挂载行。
-   * @param i 行号
-   * @param m 新值
-   * @returns 无
-   */
-  const setMount = (i: number, m: Partial<ProjectMount>) => setForm((f) => ({ ...f, mounts: f.mounts.map((x, j) => (j === i ? { ...x, ...m } : x)) }));
-
-  /**
-   * 选择宿主目录。
-   * @param i 行号（-1 表示新增）
-   * @returns Promise
-   */
-  const browse = async (i: number) => {
-    if (!isTauri()) return;
-    const dir = await openDialog({ directory: true, title: "选择要挂载到容器的项目目录" });
-    if (typeof dir !== "string") return;
-    const m = { hostPath: dir, containerPath: deriveContainerPath(dir), readOnly: false };
-    if (i < 0) patch({ mounts: [...form.mounts, m] });
-    else setMount(i, m);
-  };
 
   const localErrors = [
     nameError,
@@ -388,42 +366,7 @@ export function CreateContainerModal() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <Section
-              title="项目源码挂载（Bind Mount）"
-              icon="folder_open"
-              aside={
-                <Button variant="subtle" icon="add" className="h-7" onClick={() => void browse(-1)}>
-                  添加目录
-                </Button>
-              }
-            >
-              {form.mounts.length === 0 && (
-                <button type="button" onClick={() => void browse(-1)} className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-white/15 py-5 font-ui text-body-sm text-on-surface-variant hover:border-accent/50 hover:text-on-surface">
-                  <Icon name="create_new_folder" size={24} />
-                  选择宿主机项目目录
-                </button>
-              )}
-              {form.mounts.map((m, i) => (
-                <div key={i} className="flex flex-col gap-1.5 rounded-lg bg-white/[0.03] p-2">
-                  <div className="flex items-center gap-1.5">
-                    <Input mono value={m.hostPath} onChange={(e) => setMount(i, { hostPath: e.target.value })} placeholder="D:\\Projects\\app 或 \\\\wsl$\\Ubuntu\\home\\me\\app" />
-                    <Button icon="folder" onClick={() => void browse(i)}>
-                      浏览
-                    </Button>
-                    <button type="button" title="移除" className="text-outline hover:text-st-bad" onClick={() => patch({ mounts: form.mounts.filter((_, j) => j !== i) })}>
-                      <Icon name="delete" size={16} />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 font-ui text-label-sm text-on-surface-variant">
-                    <Icon name="subdirectory_arrow_right" size={14} />
-                    容器内
-                    <Input mono className="!h-7 flex-1" value={m.containerPath} onChange={(e) => setMount(i, { containerPath: e.target.value })} />
-                    <Switch checked={m.readOnly} onChange={(v) => setMount(i, { readOnly: v })} label="只读" />
-                  </div>
-                </div>
-              ))}
-              <span className="font-ui text-body-sm text-on-surface-variant">热切换要求各容器在<strong>相同容器路径</strong>挂载同一项目（Claude 按目录归档会话）。</span>
-            </Section>
+            <ProjectMountFields mounts={form.mounts} onChange={(mounts) => patch({ mounts })} disabled={!!busy} />
 
             <Section
               title="容器内代理能力"

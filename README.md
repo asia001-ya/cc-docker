@@ -43,6 +43,10 @@ docs/                       操作指南、功能说明、排障记录与项目�
 
 ## 快速开始
 
+Windows x64 用户可直接从 [1.0 Release](https://github.com/asia001-ya/cc-docker/releases/tag/v1.0) 下载安装包或独立运行文件。运行前安装并启动 Docker Desktop（WSL2 / Linux 容器模式）；首次启动按引导构建容器镜像。更新内容见 [1.0 发布说明](docs/releases/1.0.md)。
+
+从源码运行：
+
 ```bash
 # 1. 安装 Docker Desktop（WSL2 后端），运行桌面端
 npm ci
@@ -75,7 +79,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 - 安装包只内置公开模型定价和公共程序资源；供应商、授权账号、代理节点/订阅/凭据、会话和用量均属于个人运行数据，不随安装包分发。正式构建会移除演示数据，并执行打包隐私检查，详见 [定价与分发隔离](docs/07-claude-pricing.md)。
 
-- 额度数据只有百分比，且只在容器内 claude 运行时刷新（见 docs/03）。
+- 额度数据只有百分比，自动采集随 Claude statusline 更新；运行中的授权容器也可在额度总览手动刷新账号用量（见 docs/03）。
 - 多订阅账号轮换可能违反 Anthropic 服务条款，请自行评估。
 - 镜像入口以 root 运行并降权为 node：手工 `docker exec` 请带 `-u node`。
 - 代理已在本机 Docker 上端到端实测（本地 vless 服务端）；真实互联网节点与 GUI 全流程待验证，验证范围见 [容器代理说明](docs/06-proxy.md)。

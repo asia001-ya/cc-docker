@@ -1,6 +1,6 @@
 # 03 · 额度采集协议与热切换逻辑
 
-> 交付物 4。实现：容器侧 `docker/rootfs/opt/tdc/{statusline.mjs,tdc-ctl.sh,tdc-lib.mjs}`，
+> 交付物 4。实现：容器侧 `docker/rootfs/opt/tdc/{statusline.mjs,tdc-quota.mjs,tdc-ctl.sh,tdc-lib.mjs}`，
 > 桌面端 `src-tauri/src/quota/`、`src-tauri/src/commands/term_cmds.rs::switch_execute`，
 > 命令行版 `docker/scripts/{tdc-quota.sh,tdc-switch.sh}`。
 
@@ -24,7 +24,7 @@ Claude Code 每次刷新底栏时，把一段 JSON 通过 stdin 传给 `statusLi
 
 **限制（必须让用户知道）：**
 1. 只有**百分比**，没有 token 绝对值。
-2. 只在容器内 claude **运行并刷新 statusline** 时更新；空闲容器显示"上次已知值 + 新鲜度"，`resets_at` 已过则推断为已恢复（UI 以 `*` 标注）。
+2. 自动采集随 Claude statusline 更新；空闲容器显示“上次已知值 + 新鲜度”。运行中的授权容器还可在额度总览点击“刷新账号额度”，直接查询账号用量，无需发送对话。`resets_at` 已过则推断为已恢复（UI 以 `*` 标注），需新数据确认。
 3. API 模式没有 `rate_limits`。
 4. 字段属于 Claude Code 的 statusline 协议，未来版本可能变化；镜像锁定 Claude Code 版本（`CLAUDE_CODE_VERSION`）以降低风险。Phase 0 需在真实容器中验证该字段在订阅登录与 `CLAUDE_CODE_OAUTH_TOKEN` 两种模式下都存在。
 
@@ -47,7 +47,16 @@ Claude Code 每次刷新底栏时，把一段 JSON 通过 stdin 传给 `statusLi
   "last_session": { "session_id": "7d1f…", "tdc_session_id": "a1b2c3d4", "cwd": "/workspace/app/src" }
 }
 ```
-合并规则：本次 stdin 缺少某窗口时**保留旧值**，`rate_limits_updated_at` 只在拿到新额度时更新。
+合并规则由 `tdc-quota.mjs` 统一实现：
+
+- 限额属于账号，同一容器的多个会话共用，不能相加。同一重置周期保留已用百分比的最大值，避免空闲会话的旧缓存覆盖最新值。
+- 忽略更早重置周期的数据；出现更新周期时允许用量下降。缺少某窗口时保留旧值，缺少重置时间的缓存不能建立新周期。
+- `rate_limits_updated_at` 只在额度实际变化或主动查询成功时更新，重复的 statusline 缓存不会伪装为新数据。`updated_at` 仍记录最近活动。
+- 读、合并、写操作使用跨进程目录锁，配合原子替换，避免多个会话同时写文件时丢失窗口数据。
+
+额度总览的刷新按钮调用 `container_quota_refresh`，容器内通过官方 OAuth usage 接口读取 5 小时和周窗口。令牌只在容器内读取并通过 curl 标准输入传入；错误不输出令牌或服务响应正文。成功查询覆盖旧缓存，并同步卡片摘要、健康度和限额提示；查询失败保留原额度并显示原因。API 容器不提供此按钮，停止的容器需先启动。
+
+新版桌面端在首次轮询已有标准容器时更新配套采集脚本，不重启容器或 Claude 会话；自定义镜像继续使用自己的采集器。镜像构建上下文也包含这些脚本。
 
 ### sessions/<tdc_session_id>.json（会话级）
 ```json
@@ -138,7 +147,7 @@ sequenceDiagram
     participant B as 目标容器
     UI->>R: switch_execute(sessionId, target, cols, rows)
     R->>A: 检查源容器运行状态与 session-info（读取 cwd / 已知 Claude session_id）
-    R->>B: 未运行则 start
+    R->>B: 同步已绑定的供应商配置；未运行则按完整配置流程启动
     R->>B: test -d <cwd>            （不存在 → 报错，源会话仍保持运行）
     R->>B: 已知 session_id 时先检查 projects/*/<session_id>.jsonl
     R->>A: tdc-ctl session-stop <id> 5
@@ -157,7 +166,9 @@ sequenceDiagram
 | 项目源码（同一宿主目录挂到相同路径） | 后台进程（dev server 需在目标容器重启） |
 | 工作目录 | prompt cache：首轮按完整上下文计费，长对话会立即消耗目标账号较多额度 |
 
-**未验证的前提（Phase 0 必须实测）**：账号 A 创建的会话 JSONL 能否被账号 B 的 claude `--resume`。若失败，降级为"在相同目录新开 claude + 提示用户"——代码已处理该分支。
+恢复预检确认目标能够读取会话文件；只有历史缺失时才降级为新对话。文件存在不代表供应商已经接受恢复后的首轮请求。第三方 API 默认关闭不兼容的思考进度扩展（`CLAUDE_CODE_THINKING_DISPLAY_UPDATES=0`）；如果原服务的思考签名被拒绝，Claude 自身会重试，不需要改写共享历史或关闭思考能力。
+
+`docker/tests/provider-resume-tests.mjs` 使用真实 Claude Code 和本地模拟 API，覆盖交互恢复、首轮请求字段、旧签名重试与终端显示回复，全程只用合成历史。`npm run test:provider-resume` 需要 Linux、Claude CLI 与 tmux；Windows 会跳过，可在标准容器镜像中用 `node --test` 执行该文件。
 
 ## 7. 命令行版（无桌面端时）
 

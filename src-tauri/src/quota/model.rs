@@ -189,6 +189,9 @@ pub struct ProxyStatus {
     /// 是否放行宿主与局域网
     #[serde(default)]
     pub allow_lan: bool,
+    /// 生效配置中的直连网段；None 表示旧版状态，沿用默认私有网段。
+    #[serde(default)]
+    pub lan_cidrs: Option<Vec<String>>,
     /// 兜底规则是否完整
     #[serde(default)]
     pub guard: bool,

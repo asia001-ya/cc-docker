@@ -594,7 +594,7 @@ async fn final_snapshot_is_after_graceful_stop_and_runtime_failure_restarts_orig
     );
     let archives: Vec<_> =
         requests[..stop].iter().filter(|request| request.is("PUT", "/containers/probe-id/archive")).collect();
-    assert_eq!(archives.len(), 8);
+    assert_eq!(archives.len(), 11);
     for (request, expected) in archives.iter().zip([
         "entrypoint.sh",
         "entrypoint-user.sh",
@@ -603,6 +603,9 @@ async fn final_snapshot_is_after_graceful_stop_and_runtime_failure_restarts_orig
         "tdc-session.sh",
         "tdc-session-history.mjs",
         "tdc-usage.mjs",
+        "tdc-quota.mjs",
+        "statusline.mjs",
+        "statusline-display.mjs",
         "tdc-host-config.mjs",
     ]) {
         assert_eq!(request.query.get("path").map(String::as_str), Some("/opt/tdc"));
@@ -773,7 +776,7 @@ async fn stopped_container_rebuild_preserves_original_config_and_uses_final_snap
     assert_eq!(body["HostConfig"]["PortBindings"], json!({"8123/tcp":[{"HostIp":"127.0.0.1","HostPort":"18123"}]}));
     assert_eq!(body["HostConfig"]["Memory"], 536870912);
     assert_eq!(body["HostConfig"]["NanoCpus"], 1500000000);
-    assert_eq!(requests.iter().filter(|request| request.path.ends_with("/archive")).count(), 16);
+    assert_eq!(requests.iter().filter(|request| request.path.ends_with("/archive")).count(), 22);
     assert!(requests.last().unwrap().is("DELETE", "/containers/original-id"));
     for request in requests.iter().filter(|request| request.method == "DELETE") {
         assert_eq!(request.query.get("v").map(String::as_str), Some("false"));
@@ -983,4 +986,119 @@ fn candidate_body_preserves_custom_network_options_without_runtime_identifiers()
             && endpoint.endpoint_id.is_none()
             && endpoint.network_id.is_none()
     );
+}
+
+#[tokio::test]
+async fn edit_mounts_rebuild_preserves_account_volumes_ports_env_and_typed_mounts() {
+    use crate::commands::container_edit_cmds::read_edit;
+    let fixture = Fixture::new(Failure::None);
+    let mut inspect = fixture.inspect(false);
+    inspect.host_config.as_mut().unwrap().mounts.as_mut().unwrap().extend([
+        Mount {
+            typ: Some(MountType::BIND),
+            source: Some("D:/unchanged".into()),
+            target: Some("/workspace/unchanged".into()),
+            read_only: Some(true),
+            bind_options: Some(serde_json::from_value(json!({"Propagation":"rprivate"})).unwrap()),
+            ..Default::default()
+        },
+        Mount {
+            typ: Some(MountType::BIND),
+            source: Some("D:/skills".into()),
+            target: Some(format!("{HOST_CONFIG_ROOT}/skills")),
+            read_only: Some(true),
+            ..Default::default()
+        },
+    ]);
+    let mut edit = read_edit(&inspect).unwrap();
+    assert_eq!(edit.mounts.len(), 2, "host config and account mounts are not editable projects");
+    edit.mounts.iter_mut().find(|mount| mount.container_path == "/workspace/project").unwrap().host_path =
+        "D:/new-project".into();
+    edit.mounts.push(spec::ProjectMount {
+        host_path: "D:/added".into(),
+        container_path: "/workspace/added".into(),
+        read_only: false,
+    });
+    edit.cpus = 3.0;
+    edit.memory_mb = 1024;
+    let request = fixture.request(&inspect);
+    rebuild_candidate_with_edit(&fixture.docker(), NAME, &inspect, &request, vec![], Some(&edit), fixture.detach())
+        .await
+        .unwrap();
+    let requests = fixture.recorded();
+    let created = requests.iter().rfind(|request| request.is("POST", "/containers/create")).unwrap().json();
+    assert_eq!(created["Env"], json!(inspect.config.as_ref().unwrap().env));
+    assert_eq!(created["HostConfig"]["PortBindings"], json!(inspect.host_config.as_ref().unwrap().port_bindings));
+    assert!(created["HostConfig"]["Binds"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("tdc_home_host-test:/home/node/.claude")));
+    assert!(!created["HostConfig"]["Binds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|bind| bind.as_str().unwrap().contains("/workspace/project")));
+    let mounts = created["HostConfig"]["Mounts"].as_array().unwrap();
+    assert!(mounts.iter().any(|mount| mount["Target"] == "/workspace/project"
+        && mount["Source"] == "D:/new-project"
+        && mount["ReadOnly"] == true));
+    assert!(mounts
+        .iter()
+        .any(|mount| mount["Target"] == "/workspace/added" && mount["BindOptions"]["CreateMountpoint"] == false));
+    assert!(mounts
+        .iter()
+        .any(|mount| mount["Target"] == "/workspace/unchanged" && mount["BindOptions"]["Propagation"] == "rprivate"));
+    assert!(mounts.iter().any(|mount| mount["Source"] == "extra-data"));
+    assert_eq!(created["HostConfig"]["NanoCpus"], 3_000_000_000_i64);
+    assert_eq!(created["HostConfig"]["Memory"], 1024 * 1024 * 1024);
+    assert!(!requests.iter().any(|request| request.path.contains("/volumes/")));
+}
+
+#[tokio::test]
+async fn edit_mount_failure_restores_original_and_protected_targets_fail_before_mutation() {
+    use crate::commands::container_edit_cmds::read_edit;
+    let fixture = Fixture::new(Failure::CandidateStart);
+    let inspect = fixture.inspect(true);
+    let mut edit = read_edit(&inspect).unwrap();
+    edit.mounts.clear();
+    assert!(rebuild_candidate_with_edit(
+        &fixture.docker(),
+        NAME,
+        &inspect,
+        &fixture.request(&inspect),
+        vec![],
+        Some(&edit),
+        fixture.detach()
+    )
+    .await
+    .is_err());
+    let requests = fixture.recorded();
+    assert_original_preserved(&requests);
+    assert!(requests.iter().any(|request| request.is("POST", "/containers/original-id/start")));
+
+    let fixture = Fixture::new(Failure::None);
+    let inspect = fixture.inspect(false);
+    for target in ["/home/node/.claude", "/home/node", "/opt/tdc/host-config/skills", "/opt/data", "/"] {
+        let mut edit = read_edit(&inspect).unwrap();
+        edit.mounts.push(spec::ProjectMount {
+            host_path: "D:/project".into(),
+            container_path: target.into(),
+            read_only: false,
+        });
+        assert!(
+            rebuild_candidate_with_edit(
+                &fixture.docker(),
+                NAME,
+                &inspect,
+                &fixture.request(&inspect),
+                vec![],
+                Some(&edit),
+                fixture.detach()
+            )
+            .await
+            .is_err(),
+            "{target}"
+        );
+        assert!(fixture.recorded().is_empty(), "invalid targets must be rejected before touching Docker");
+    }
 }

@@ -108,37 +108,43 @@ export function addUsageMetrics(a: UsageMetrics, b: UsageMetrics): UsageMetrics 
   return value;
 }
 
-/** 补齐没有用量的日期，并将长区间合并为月，保证多年历史仍可阅读。 */
-export function displayUsageTrend(points: UsageTrendPoint[], query: Pick<UsageQuery, "from" | "to" | "utcOffsetMinutes">): { points: UsageTrendPoint[]; monthly: boolean } {
+/** Parse a server bucket in the query's fixed local time zone for chart spacing. */
+export function trendTimestamp(date: string): number {
+  return Date.parse(date.length === 10 ? date + "T00:00:00Z" : date + ":00Z");
+}
+
+/** Fill empty days/hours without changing the chosen aggregation or losing non-empty buckets. */
+export function displayUsageTrend(points: UsageTrendPoint[], query: Pick<UsageQuery, "from" | "to" | "utcOffsetMinutes" | "granularity">): { points: UsageTrendPoint[]; granularity: "day" | "hour" } {
+  const granularity = query.granularity ?? "day";
+  const hourly = granularity === "hour";
   const offset = (query.utcOffsetMinutes ?? 0) * 60;
-  const asDate = (stamp: number) => new Date((stamp + offset) * 1000).toISOString().slice(0, 10);
+  const asKey = (stampMs: number) => new Date(stampMs).toISOString().slice(0, hourly ? 13 : 10) + (hourly ? ":00" : "");
   const ordered = points.slice().sort((a, b) => a.date.localeCompare(b.date));
-  const first = query.from !== undefined ? asDate(query.from) : ordered[0]?.date;
-  const last = query.to !== undefined ? asDate(query.to - 1) : ordered[ordered.length - 1]?.date;
-  if (!first || !last) return { points: [], monthly: false };
-  const start = Date.parse(`${first}T00:00:00Z`);
-  const finish = Date.parse(`${last}T00:00:00Z`);
-  const monthly = (finish - start) / 86_400_000 > 62;
-  const map = new Map<string, UsageMetrics>();
-  for (const point of ordered) {
-    const key = monthly ? point.date.slice(0, 7) : point.date;
-    map.set(key, addUsageMetrics(map.get(key) ?? ZERO_USAGE, point.metrics));
-  }
-  const filled: UsageTrendPoint[] = [];
-  if (monthly) {
-    const current = new Date(start);
-    current.setUTCDate(1);
-    // Date inputs are browser-bounded; this also bounds payload rendering for malformed source dates.
-    for (let i = 0; current.getTime() <= finish && i < 1200; i++) {
-      const key = current.toISOString().slice(0, 7);
-      filled.push({ date: key, metrics: map.get(key) ?? ZERO_USAGE });
-      current.setUTCMonth(current.getUTCMonth() + 1);
-    }
+  const first = query.from !== undefined ? asKey((query.from + offset) * 1000) : ordered[0]?.date;
+  const last = query.to !== undefined ? asKey((query.to - 1 + offset) * 1000) : ordered[ordered.length - 1]?.date;
+  if (!first || !last) return { points: [], granularity };
+  const start = trendTimestamp(first);
+  const finish = trendTimestamp(last);
+  if (!Number.isFinite(start) || !Number.isFinite(finish) || finish < start) return { points: [], granularity };
+  const step = hourly ? 3_600_000 : 86_400_000;
+  const map = new Map(ordered.filter((point) => point.date >= first && point.date <= last).map((point) => [point.date, point.metrics]));
+  const fill = (stamp: number) => {
+    if (stamp < start || stamp > finish) return;
+    const key = asKey(stamp);
+    if (!map.has(key)) map.set(key, ZERO_USAGE);
+  };
+  if ((finish - start) / step <= 3660) {
+    for (let stamp = start; stamp <= finish; stamp += step) fill(stamp);
   } else {
-    for (let stamp = start; stamp <= finish; stamp += 86_400_000) {
-      const key = new Date(stamp).toISOString().slice(0, 10);
-      filled.push({ date: key, metrics: map.get(key) ?? ZERO_USAGE });
+    // Preserve the true time axis over long histories, with zero-valued neighbours around activity.
+    fill(start);
+    fill(finish);
+    for (const point of ordered) {
+      const stamp = trendTimestamp(point.date);
+      if (!Number.isFinite(stamp)) continue;
+      fill(stamp - step);
+      fill(stamp + step);
     }
   }
-  return { points: filled, monthly };
+  return { points: [...map].sort(([a], [b]) => a.localeCompare(b)).map(([date, metrics]) => ({ date, metrics })), granularity };
 }

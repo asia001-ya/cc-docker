@@ -9,7 +9,9 @@ import { useFleetStore } from "../../store/fleetStore";
 import { useActiveSession, useTabStore } from "../../store/tabStore";
 import { useUiStore } from "../../store/uiStore";
 import { colorForRemaining, HEALTH_LABEL, remainingLabel } from "../../lib/quota";
-import { Icon, IconButton, ProgressBar, StatusDot } from "../ui/controls";
+import { Icon, IconButton, StatusDot } from "../ui/controls";
+import { QuotaWindowRow } from "./QuotaWindowRow";
+import { useNow } from "./StatusBar";
 
 interface Props {
   /** 在容器中新开会话 */
@@ -29,6 +31,8 @@ function ContainerCard({ entry, active, onOpen, onMenu }: { entry: FleetEntry; a
   const rem = entry.remaining?.remaining ?? 0;
   const color = entry.health === "api" ? "#60CDFF" : colorForRemaining(rem, q.warnThreshold, q.criticalThreshold);
   const off = entry.health === "stopped";
+  const now = useNow();
+  const isApi = (entry.provider?.mode ?? entry.container.authMode) === "api";
   const proxyState = entry.proxy?.state;
   // 代理开启时在容器名旁显示盾牌：绿色正常、红色断网或兜底缺失
   const proxyBadge =
@@ -74,7 +78,10 @@ function ContainerCard({ entry, active, onOpen, onMenu }: { entry: FleetEntry; a
         </span>
         <span className="shrink-0">{off ? "已停止" : entry.health === "exhausted" && entry.blockedUntil ? "冷却中" : `${sessionCount} 会话`}</span>
       </div>
-      {entry.health !== "api" && <ProgressBar pct={off ? 0 : rem} color={color} height={3} />}
+      {!isApi && <div className="flex flex-col gap-1">
+        <QuotaWindowRow label="5小时" win={entry.quota?.five_hour} now={now} compact />
+        <QuotaWindowRow label="周" win={entry.quota?.seven_day} now={now} compact />
+      </div>}
       {entry.error && (
         <span className="flex items-center gap-1 font-ui text-label-sm text-st-warn">
           <Icon name="warning" size={12} />
@@ -111,7 +118,7 @@ function ContainerMenu({ entry, x, y, onClose, onOpenIn }: { entry: FleetEntry; 
     <div className="fixed inset-0 z-[60]" onMouseDown={onClose} onContextMenu={(e) => e.preventDefault()}>
       <div
         className="wallpaper-panel acrylic-surface absolute w-52 rounded-lg border border-white/[0.14] p-1"
-        style={{ left: x, top: Math.min(y, window.innerHeight - 310) }}
+        style={{ left: Math.min(x, window.innerWidth - 216), top: Math.max(8, Math.min(y, window.innerHeight - 370)) }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <button type="button" className={item} disabled={!entry.container.running} onClick={() => (onClose(), onOpenIn(name))}>
@@ -119,6 +126,9 @@ function ContainerMenu({ entry, x, y, onClose, onOpenIn }: { entry: FleetEntry; 
         </button>
         <button type="button" className={item} onClick={() => (onClose(), openModal({ kind: "auth", container: name }))}>
           <Icon name="key" size={16} /> 账号授权 / 切换 API
+        </button>
+        <button type="button" className={item} onClick={() => (onClose(), openModal({ kind: "editContainer", container: name }))}>
+          <Icon name="edit" size={16} /> 编辑容器 / 挂载…
         </button>
         <button type="button" className={item} onClick={() => (onClose(), openModal({ kind: "proxy", container: name }))}>
           <Icon name="vpn_lock" size={16} /> 代理…

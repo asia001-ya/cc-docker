@@ -162,6 +162,15 @@ impl UsageStore {
     /// 按请求原供应商的当前价格估算，仅改变查询副本；原账本和归属不变。
     /// 已删除供应商或没有供应商 ID 时，保留请求捕获时的价格。
     pub fn query_with_pricing(&self, query: &UsageQuery, pricing: &ProviderPricingTable) -> AppResult<UsageResult> {
+        self.query_with_default_pricing(query, pricing, &crate::providers::DefaultPricing::default().snapshot())
+    }
+
+    pub fn query_with_default_pricing(
+        &self,
+        query: &UsageQuery,
+        pricing: &ProviderPricingTable,
+        defaults: &crate::providers::ProviderPricing,
+    ) -> AppResult<UsageResult> {
         query.validate()?;
         let data = self.data.lock();
         let mut collection = data.collection.clone();
@@ -172,8 +181,13 @@ impl UsageStore {
             .filter(|record| query.matches(record))
             .cloned()
             .map(|mut record| {
-                if record.auth_type == "api" && record.attribution == "captured" {
-                    if let Some(current) = record.provider_id.as_ref().and_then(|id| pricing.get(id)) {
+                if record.attribution == "captured" {
+                    let current = match record.auth_type.as_str() {
+                        "api" => record.provider_id.as_ref().and_then(|id| pricing.get(id)),
+                        "authorization" => Some(defaults),
+                        _ => None,
+                    };
+                    if let Some(current) = current {
                         record.pricing = current.model_pricing.get(&record.model).copied().unwrap_or(current.pricing);
                         record.pricing_tier = current.model_pricing_tiers.get(&record.model).copied();
                         record.apply_pricing_tier();
@@ -185,6 +199,7 @@ impl UsageStore {
         let mut totals = UsageMetrics::default();
         let mut by_container = BTreeMap::<String, UsageMetrics>::new();
         let mut by_day = BTreeMap::<i64, UsageMetrics>::new();
+        let bucket_seconds = query.granularity.seconds();
         let offset = query.utc_offset_minutes.unwrap_or(0) as i64 * 60;
         for state in &collection.containers {
             if query.container.as_ref().map_or(true, |s| *s == state.container) {
@@ -194,18 +209,21 @@ impl UsageStore {
         for record in &records {
             totals.add(record);
             by_container.entry(record.container.clone()).or_default().add(record);
-            by_day.entry((record.timestamp + offset).div_euclid(86_400)).or_default().add(record);
+            by_day.entry((record.timestamp + offset).div_euclid(bucket_seconds)).or_default().add(record);
         }
         let now = now_secs();
-        let start = query.from.map(|n| (n + offset).div_euclid(86_400)).or_else(|| by_day.keys().next().copied());
-        let end = (query.to.unwrap_or(now + 1) - 1 + offset).div_euclid(86_400);
+        let start =
+            query.from.map(|n| (n + offset).div_euclid(bucket_seconds)).or_else(|| by_day.keys().next().copied());
+        let end = (query.to.unwrap_or(now + 1) - 1 + offset).div_euclid(bucket_seconds);
         if let Some(start) = start {
             if (0..=3660).contains(&(end - start)) {
                 for day in start..=end {
                     by_day.entry(day).or_default();
                 }
             } else if end - start > 3660 {
-                collection.warnings.push("时间跨度超过十年，趋势仅展示有请求的日期；总计仍包括完整范围。".into());
+                collection.warnings.push(
+                    "时间跨度较大，趋势保留有请求的时段；可缩小日期范围查看连续趋势，总计仍包括完整范围。".into(),
+                );
             }
         }
         let containers = by_container
@@ -222,7 +240,17 @@ impl UsageStore {
                 ContainerUsage { container, metrics, collection: state }
             })
             .collect();
-        let trend = by_day.into_iter().map(|(day, metrics)| UsageTrend { date: civil_date(day), metrics }).collect();
+        let trend = by_day
+            .into_iter()
+            .map(|(bucket, metrics)| UsageTrend {
+                date: if bucket_seconds == 3600 {
+                    format!("{}T{:02}:00", civil_date(bucket.div_euclid(24)), bucket.rem_euclid(24))
+                } else {
+                    civil_date(bucket)
+                },
+                metrics,
+            })
+            .collect();
         let mut ordered = records;
         ordered.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
         let total_logs = ordered.len();

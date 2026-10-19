@@ -20,7 +20,8 @@ import {
 import { useUiStore } from "../../store/uiStore";
 import { useEntry } from "../../store/fleetStore";
 import { DEMO_PROXY_NODES } from "../../lib/demo";
-import { EMPTY_PROXY_BINDING as EMPTY_BINDING, patchProxyBinding } from "../../lib/proxyBinding";
+import { EMPTY_PROXY_BINDING as EMPTY_BINDING, patchProxyBinding, proxyBindingError } from "../../lib/proxyBinding";
+import { DEFAULT_LAN_CIDRS } from "../../lib/proxyLan";
 import { PROXY_CHECK_LABELS as CHECK_LABEL } from "../../lib/proxyChecks";
 import { ProxyBindingFields } from "./ProxyBindingFields";
 import { Modal } from "../ui/Modal";
@@ -30,7 +31,7 @@ import { Button, Callout, Icon, Section, Switch } from "../ui/controls";
 export const PROXY_STATE_META: Record<string, { label: string; color: string; desc: string }> = {
   off: { label: "未开启", color: "text-outline", desc: "容器直连网络" },
   starting: { label: "启动中", color: "text-st-warn", desc: "内核正在建立 TUN，此期间网络不通" },
-  ok: { label: "运行中", color: "text-st-ok", desc: "全部流量经节点，DNS 经代理解析" },
+  ok: { label: "运行中", color: "text-st-ok", desc: "公网流量经节点，DNS 经代理解析" },
   blackhole: { label: "已断网", color: "text-st-bad", desc: "代理不可用，兜底规则已阻断所有直连（失败即断网）" },
   leak: { label: "兜底缺失", color: "text-st-bad", desc: "代理已启用但兜底规则不完整，流量可能绕过代理" },
 };
@@ -103,7 +104,8 @@ export function ProxyModal({ container }: { container: string }) {
    */
   const apply = async () => {
     if (!isTauri()) return toast("info", "演示模式：未连接后端");
-    if (draft.enabled && !draft.nodeId) return toast("warning", "开启代理必须选择节点");
+    const validationError = proxyBindingError(draft, nodes);
+    if (validationError) return toast("warning", validationError);
     setBusy("apply");
     setResult(null);
     try {
@@ -205,7 +207,7 @@ export function ProxyModal({ container }: { container: string }) {
   };
 
   const meta = PROXY_STATE_META[status?.state ?? "off"] ?? PROXY_STATE_META.off;
-  const canApply = ready && running && !busy && (!draft.enabled || !!draft.nodeId);
+  const canApply = ready && running && !busy && !proxyBindingError(draft, nodes);
 
   return (
     <Modal
@@ -220,7 +222,7 @@ export function ProxyModal({ container }: { container: string }) {
             关闭代理（恢复直连）
           </Button>
         ) : (
-          <span className="font-ui text-label-md text-on-surface-variant">开启后流量全部经节点；代理不可用时断网，不会回退直连</span>
+          <span className="font-ui text-label-md text-on-surface-variant">公网经节点；代理不可用时阻断公网，不会回退直连</span>
         )
       }
       footer={
@@ -277,8 +279,11 @@ export function ProxyModal({ container }: { container: string }) {
               {meta.desc}
               {status?.enabled && ` · ${status.engine === "xray" ? "Xray" : "Mihomo"}`}
               {status && status.restarts > 0 && ` · 内核已自动重启 ${status.restarts} 次`}
-              {status?.allow_lan && " · 允许直连宿主与局域网"}
+              {status?.enabled && status.allow_lan && " · 已允许指定内网直连"}
             </span>
+            {status?.enabled && status.allow_lan && <span className="break-words font-mono text-code-sm text-on-surface-variant">
+              直连列表：{(status.lan_cidrs ?? DEFAULT_LAN_CIDRS).join("、") || "无有效网段"}
+            </span>}
             {status?.last_error && <span className="break-all font-mono text-code-sm text-st-bad">{status.last_error}</span>}
             {status?.warnings.map((w) => (
               <span key={w} className="font-ui text-body-sm text-st-warn">

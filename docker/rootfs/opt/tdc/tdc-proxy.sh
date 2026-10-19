@@ -14,7 +14,7 @@
 #   tdc-proxy.sh daemon [--once]  常驻守护：内核崩溃重启（退避 5→60s）、兜底自愈、写状态
 #
 # 文件（$TDC_PROXY_DIR，默认 /var/lib/tdc/proxy，root 0700，位于容器层而非卷）：
-#   config.yaml   桌面端生成的 mihomo 配置（JSON 内容）  intent.json  期望状态 {enabled,allow_lan,selected}
+#   config.yaml   桌面端生成的 mihomo 配置（JSON 内容）  intent.json  期望状态 {enabled,allow_lan,lan_cidrs,selected}
 #   mihomo.sock   控制器 unix socket                    core.pid / mihomo.log / last_error / core.restarts
 # 状态输出：$TDC_PROXY_STATUS（默认 /var/lib/tdc/proxy-status.json，0644，node 可读）
 #

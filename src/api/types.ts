@@ -147,6 +147,28 @@ export interface ProjectMount {
   readOnly: boolean;
 }
 
+export interface ContainerEdit {
+  mounts: ProjectMount[];
+  cpus: number;
+  memoryMb: number;
+  workingDir: string;
+}
+
+export interface ContainerEditView {
+  config: ContainerEdit;
+  image: string;
+  containerId: string;
+  running: boolean;
+  affectedSessions: number;
+}
+
+export interface ContainerDirectories {
+  path: string;
+  parent: string;
+  directories: { name: string; path: string }[];
+  truncated: boolean;
+}
+
 /** 端口映射 */
 export interface PortMapping {
   containerPort: number;
@@ -395,6 +417,7 @@ export interface Settings {
   terminal: TerminalSettings;
   quota: QuotaSettings;
   docker: DockerSettings;
+  defaultPricing: DefaultPricing;
   sidebarShortcut: string;
 }
 
@@ -405,6 +428,11 @@ export interface Pricing {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+}
+
+export interface DefaultPricing {
+  pricing: Pricing;
+  modelPricing: Record<string, Pricing>;
 }
 
 export interface ProviderProfile {
@@ -453,6 +481,8 @@ export interface ProxyBinding {
   /** 出口节点（必须是 socks5）：链路为 [静态中转 →] 节点 → 出口 → 目标 */
   exitId: string | null;
   allowLan: boolean;
+  /** 仅允许私有 IPv4 地址或 CIDR 网段直连 */
+  lanCidrs: string[];
   selected: string | null;
 }
 
@@ -481,6 +511,8 @@ export interface ProxyStatus {
   state: ProxyState | string;
   enabled: boolean;
   allow_lan: boolean;
+  /** 旧版状态可能缺失，此时沿用默认私有网段 */
+  lan_cidrs?: string[] | null;
   guard: boolean;
   tun: boolean;
   core_pid: number | null;
@@ -521,8 +553,10 @@ export interface SharedGroupRequest {
 
 /** 用量统计：时间戳均为 Unix 秒，筛选区间为 [from, to)。 */
 export type UsageAuthType = "api" | "authorization" | "unknown";
+export type UsageGranularity = "day" | "hour";
 
 export interface UsageQuery {
+  granularity?: UsageGranularity;
   from?: number;
   to?: number;
   container?: string;

@@ -1,6 +1,6 @@
 [package]
 name = "tht-docker-claude"
-version = "0.1.0"
+version = "1.0.0"
 description = "Claude 多容器终端管理器"
 edition = "2021"
 rust-version = "1.80"

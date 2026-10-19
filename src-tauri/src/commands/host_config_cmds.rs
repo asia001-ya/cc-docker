@@ -94,7 +94,7 @@ fn labels(inspect: &ContainerInspectResponse) -> HashMap<String, String> {
 }
 
 /// 旧版标准镜像可只在候选容器中更新脚本；自定义入口不做猜测性改写。
-fn validate_rebuild_shape(inspect: &ContainerInspectResponse) -> AppResult<bool> {
+pub(super) fn validate_rebuild_shape(inspect: &ContainerInspectResponse) -> AppResult<bool> {
     let cfg = inspect.config.as_ref().ok_or_else(|| AppError::Invalid("容器缺少创建配置".into()))?;
     let labels = labels(inspect);
     let standard = labels.get("tdc.image").is_some_and(|value| value == "claude-dev")
@@ -135,7 +135,7 @@ fn validate_rebuild_shape(inspect: &ContainerInspectResponse) -> AppResult<bool>
 }
 
 /// 将 inspect 中未出现在 HostConfig 的匿名卷也固定到原卷名，避免重建分配新空卷。
-fn complete_host_config(inspect: &ContainerInspectResponse) -> AppResult<HostConfig> {
+pub(super) fn complete_host_config(inspect: &ContainerInspectResponse) -> AppResult<HostConfig> {
     let mut host = inspect.host_config.clone().unwrap_or_default();
     let mut represented: std::collections::HashSet<String> = host
         .binds
@@ -231,7 +231,7 @@ pub struct HostConfigApplyResult {
 }
 
 /// 全局串行化重建，避免同一容器在两个提交中同时被改名。
-fn rebuild_lock() -> &'static tokio::sync::Mutex<()> {
+pub(super) fn rebuild_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
@@ -320,7 +320,7 @@ pub async fn container_host_config_apply(
     result
 }
 
-fn check_expected_id(inspect: &ContainerInspectResponse, expected: &str) -> AppResult<()> {
+pub(super) fn check_expected_id(inspect: &ContainerInspectResponse, expected: &str) -> AppResult<()> {
     if expected.is_empty() || inspect.id.as_deref() != Some(expected) {
         Err(AppError::Invalid("容器已变化，请重新打开配置窗口后再应用".into()))
     } else {
@@ -521,6 +521,9 @@ async fn install_runtime(docker: &DockerClient, candidate: &str) -> AppResult<()
         ("tdc-session.sh", include_str!("../../../docker/rootfs/opt/tdc/tdc-session.sh")),
         ("tdc-session-history.mjs", include_str!("../../../docker/rootfs/opt/tdc/tdc-session-history.mjs")),
         ("tdc-usage.mjs", include_str!("../../../docker/rootfs/opt/tdc/tdc-usage.mjs")),
+        ("tdc-quota.mjs", include_str!("../../../docker/rootfs/opt/tdc/tdc-quota.mjs")),
+        ("statusline.mjs", include_str!("../../../docker/rootfs/opt/tdc/statusline.mjs")),
+        ("statusline-display.mjs", include_str!("../../../docker/rootfs/opt/tdc/statusline-display.mjs")),
         ("tdc-host-config.mjs", include_str!("../../../docker/rootfs/opt/tdc/tdc-host-config.mjs")),
     ] {
         docker
@@ -577,12 +580,31 @@ pub(crate) async fn rebuild_candidate(
     name: &str,
     inspect: &ContainerInspectResponse,
     req: &CreateContainerRequest,
+    warnings: Vec<String>,
+    detach: impl FnOnce(),
+) -> AppResult<HostConfigApplyResult> {
+    rebuild_candidate_with_edit(docker, name, inspect, req, warnings, None, detach).await
+}
+
+pub(super) async fn rebuild_candidate_with_edit(
+    docker: &DockerClient,
+    name: &str,
+    inspect: &ContainerInspectResponse,
+    req: &CreateContainerRequest,
     mut warnings: Vec<String>,
+    edit: Option<&super::container_edit_cmds::ContainerEdit>,
     detach: impl FnOnce(),
 ) -> AppResult<HostConfigApplyResult> {
     validate_rebuild_shape(inspect)?;
+    let build = |image: &str| -> AppResult<ContainerCreateBody> {
+        let mut body = candidate_body(inspect, req, image)?;
+        if let Some(edit) = edit {
+            super::container_edit_cmds::apply_edit_to_body(inspect, &mut body, edit)?;
+        }
+        Ok(body)
+    };
     // 完整构造先于 commit/stop；非法目标不会触碰运行中的容器。
-    candidate_body(inspect, req, "precheck")?;
+    build("precheck")?;
     let original = inspect.id.as_deref().ok_or_else(|| AppError::Invalid("容器缺少 ID".into()))?;
     let was_running = inspect.state.as_ref().and_then(|state| state.running).unwrap_or(false);
     let token = uuid::Uuid::new_v4().simple().to_string();
@@ -595,7 +617,7 @@ pub(crate) async fn rebuild_candidate(
         .as_deref()
         .or_else(|| inspect.config.as_ref().and_then(|config| config.image.as_deref()))
         .ok_or_else(|| AppError::Invalid("原容器缺少镜像记录".into()))?;
-    let probe = docker.create_candidate(&temporary, candidate_body(inspect, req, base_image)?).await?;
+    let probe = docker.create_candidate(&temporary, build(base_image)?).await?;
     if let Err(error) = install_runtime(docker, &probe).await {
         let cleanup = docker.remove(&probe, false).await;
         return Err(AppError::Other(format!(
@@ -625,7 +647,7 @@ pub(crate) async fn rebuild_candidate(
                 inspect.config.clone().unwrap_or_default(),
             )
             .await?;
-        let candidate = docker.create_candidate(&temporary, candidate_body(inspect, req, &snapshot)?).await?;
+        let candidate = docker.create_candidate(&temporary, build(&snapshot)?).await?;
         candidate_id = Some(candidate.clone());
         install_runtime(docker, &candidate).await?;
         Ok(candidate)

@@ -10,7 +10,11 @@ const PROVIDER_USAGE_PENDING_FILE: &str = crate::usage::PROVIDER_USAGE_PENDING_F
 
 #[tauri::command]
 pub fn usage_query(state: State<'_, AppState>, query: UsageQuery) -> AppResult<UsageResult> {
-    state.usage.query_with_pricing(&query, &state.providers.pricing_snapshot())
+    state.usage.query_with_default_pricing(
+        &query,
+        &state.providers.pricing_snapshot(),
+        &state.config.settings().default_pricing.snapshot(),
+    )
 }
 
 #[tauri::command]

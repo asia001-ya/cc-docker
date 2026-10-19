@@ -20,7 +20,7 @@ function demoRows(now: Date): UsageLog[] {
       const outputTokens = 350 + ordinal * 7;
       const cacheReadTokens = index % 4 ? 2_400 + ordinal * 37 : 0;
       const cacheWriteTokens = index % 4 ? 0 : 1_800 + ordinal * 11;
-      const pricing = api && !historical ? { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+      const pricing = !historical ? { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
       const timestamp = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day, 8 + index, ordinal % 60).getTime() / 1000;
       if (timestamp > now.getTime() / 1000) continue;
       const durationMs = index % 5 ? 15_000 + index * 2_700 : null;
@@ -64,7 +64,7 @@ export function queryUsageDemo(query: UsageQuery, now = new Date()): UsageResult
     && (!query.model || row.model === query.model));
   const groups = new Map<string, UsageLog[]>();
   for (const row of scope) {
-    const date = new Date((row.timestamp + (query.utcOffsetMinutes ?? 0) * 60) * 1000).toISOString().slice(0, 10);
+    const date = new Date((row.timestamp + (query.utcOffsetMinutes ?? 0) * 60) * 1000).toISOString().slice(0, query.granularity === "hour" ? 13 : 10) + (query.granularity === "hour" ? ":00" : "");
     groups.set(date, [...(groups.get(date) ?? []), row]);
   }
   const generatedAt = Math.floor(now.getTime() / 1000);

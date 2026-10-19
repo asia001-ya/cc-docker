@@ -161,10 +161,10 @@ async fn 新建代理先写配置和绑定再启动_仅创建保持停止() {
         let archives: Vec<_> = requests.iter().filter(|(r, _)| r.contains("/archive?")).collect();
         assert_eq!(
             archives.len(),
-            5 + 2 * usize::from(start),
+            8 + 2 * usize::from(start),
             "代理脚本、私密配置与活动/待定用量来源快照应在启动前同步"
         );
-        for ((_, body), filename) in archives.iter().skip(3).zip(["config.yaml", "intent.json"]) {
+        for ((_, body), filename) in archives.iter().skip(6).zip(["config.yaml", "intent.json"]) {
             let mut archive = tar::Archive::new(body.as_slice());
             let mut entries = archive.entries().unwrap();
             let mut entry = entries.next().unwrap().unwrap();
@@ -176,6 +176,7 @@ async fn 新建代理先写配置和绑定再启动_仅创建保持停止() {
             let value: serde_json::Value = serde_json::from_str(&content).unwrap();
             if filename == "intent.json" {
                 assert_eq!(value["enabled"], true);
+                assert_eq!(value["lan_cidrs"], serde_json::json!(crate::proxy::lan::default_cidrs()));
             }
         }
         assert_eq!(requests.iter().any(|(r, _)| r.contains("/start")), start);
@@ -187,7 +188,7 @@ async fn 新建代理先写配置和绑定再启动_仅创建保持停止() {
 
 #[tokio::test]
 async fn 任一代理文件写入失败都删除新容器且不启动不删卷() {
-    for failed in 1..=7 {
+    for failed in 1..=10 {
         let f = Fixture::new(failed);
         let proxies = ProxyStore::load(&f.dir);
         let providers = ProviderStore::load(&f.dir).unwrap();

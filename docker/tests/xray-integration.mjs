@@ -59,7 +59,7 @@ try {
   // 先启动镜像原有守护，再更新脚本，覆盖旧容器在线升级的路径。
   await run(["exec", "-d", "--user", "root", id, "/opt/tdc/tdc-proxy.sh", "daemon"]);
   await sleep(400);
-  for (const file of ["tdc-proxy-lib.mjs", "tdc-xray.mjs", "tdc-proxy.sh"]) {
+  for (const file of ["lan-policy.json", "tdc-lan.mjs", "proxy-guard.sh", "tdc-proxy-lib.mjs", "tdc-xray.mjs", "tdc-proxy.sh"]) {
     await run(["cp", path.join(ROOT, "docker/rootfs/opt/tdc", file), `${id}:/opt/tdc/${file}`]);
   }
   // Xray 由镜像构建时内置，运行时不下载

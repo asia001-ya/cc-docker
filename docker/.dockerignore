@@ -10,6 +10,7 @@
 !rootfs/opt/tdc/
 !rootfs/opt/tdc/entrypoint-user.sh
 !rootfs/opt/tdc/entrypoint.sh
+!rootfs/opt/tdc/lan-policy.json
 !rootfs/opt/tdc/portwatch.sh
 !rootfs/opt/tdc/proxy-guard.sh
 !rootfs/opt/tdc/region-options.json
@@ -20,7 +21,9 @@
 !rootfs/opt/tdc/tdc-host-config.mjs
 !rootfs/opt/tdc/tdc-git-bridge.mjs
 !rootfs/opt/tdc/tdc-install-xray.sh
+!rootfs/opt/tdc/tdc-lan.mjs
 !rootfs/opt/tdc/tdc-lib.mjs
+!rootfs/opt/tdc/tdc-quota.mjs
 !rootfs/opt/tdc/tdc-proxy-lib.mjs
 !rootfs/opt/tdc/tdc-proxy.sh
 !rootfs/opt/tdc/tdc-session-history.mjs

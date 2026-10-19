@@ -43,7 +43,8 @@ export function Modal({ title, icon, badge, width = 640, danger = false, onClose
 
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    const first = panel.current?.querySelector<HTMLElement>("[data-autofocus], input, select, textarea, button:not([data-close])");
+    const first = panel.current?.querySelector<HTMLElement>("[data-autofocus]:not([disabled])")
+      ?? panel.current?.querySelector<HTMLElement>("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([data-close]):not([disabled])");
     first?.focus();
     /**
      * 键盘处理：Esc 关闭、Ctrl+Enter 提交、Tab 焦点约束在弹框内。

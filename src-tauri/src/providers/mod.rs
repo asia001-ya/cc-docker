@@ -60,6 +60,44 @@ pub struct ProviderPricing {
 
 pub type ProviderPricingTable = HashMap<String, ProviderPricing>;
 
+/// Editable reference prices for captured subscription usage, independent of API providers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DefaultPricing {
+    pub pricing: TokenPricing,
+    pub model_pricing: HashMap<String, TokenPricing>,
+}
+
+impl Default for DefaultPricing {
+    fn default() -> Self {
+        let mut model_pricing = HashMap::new();
+        pricing::fill_missing(&mut model_pricing);
+        Self { pricing: TokenPricing::default(), model_pricing }
+    }
+}
+
+impl DefaultPricing {
+    pub fn normalize(&mut self) {
+        pricing::fill_missing(&mut self.model_pricing);
+    }
+
+    pub fn validate(&self) -> AppResult<()> {
+        self.pricing.validate()?;
+        for (model, price) in &self.model_pricing {
+            if model.trim().is_empty() || model.len() > 512 || model.chars().any(char::is_control) {
+                return Err(AppError::Invalid("默认定价的模型 ID 无效".into()));
+            }
+            price.validate()?;
+        }
+        Ok(())
+    }
+
+    pub fn snapshot(&self) -> ProviderPricing {
+        let (model_pricing, model_pricing_tiers) = pricing::snapshot_prices(&self.model_pricing);
+        ProviderPricing { pricing: self.pricing, model_pricing, model_pricing_tiers }
+    }
+}
+
 /// 供应商配置（不含 Token）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -289,6 +327,15 @@ pub fn provider_env(p: &ProviderProfile, token: &str) -> HashMap<String, String>
         env.insert("ANTHROPIC_SMALL_FAST_MODEL".into(), p.small_model.clone());
     }
     env.retain(|k, v| !k.is_empty() && !v.is_empty());
+    // Claude Code 的交互界面默认请求 thinking.display="updates"；部分中转
+    // 只接受 summarized / omitted。关闭进度扩展，保留正常 thinking 与其他功能。
+    // 按最终 URL 判断（也覆盖 extra_env），且尊重供应商显式配置。
+    if env
+        .get("ANTHROPIC_BASE_URL")
+        .is_some_and(|base| !url::Url::parse(base.trim()).is_ok_and(|url| url.host_str() == Some("api.anthropic.com")))
+    {
+        env.entry("CLAUDE_CODE_THINKING_DISPLAY_UPDATES".into()).or_insert_with(|| "0".into());
+    }
     env
 }
 
@@ -320,6 +367,42 @@ mod tests {
         assert_eq!(env["ANTHROPIC_MODEL"], "claude-sonnet-5");
         assert!(!env.contains_key("ANTHROPIC_SMALL_FAST_MODEL"));
         assert!(!env.contains_key("EMPTY"));
+    }
+
+    fn profile(base_url: &str) -> ProviderProfile {
+        serde_json::from_value(serde_json::json!({"id":"test", "name":"Test", "baseUrl":base_url})).unwrap()
+    }
+
+    #[test]
+    fn 第三方_api_默认禁用不兼容的思考进度扩展() {
+        for base in ["https://gateway.example.com", "http://localhost:4000", "https://api.anthropic.com.example.com"] {
+            let env = provider_env(&profile(base), "test-token");
+            assert_eq!(env["CLAUDE_CODE_THINKING_DISPLAY_UPDATES"], "0");
+            assert!(!env.contains_key("CLAUDE_CODE_DISABLE_THINKING"));
+            assert!(!env.contains_key("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"));
+        }
+    }
+
+    #[test]
+    fn 官方_api_与订阅保留默认思考进度() {
+        for base in ["", "https://api.anthropic.com/", "https://api.anthropic.com:443"] {
+            assert!(!provider_env(&profile(base), "test-token").contains_key("CLAUDE_CODE_THINKING_DISPLAY_UPDATES"));
+        }
+    }
+
+    #[test]
+    fn 思考进度兼容设置尊重显式覆盖并使用最终_base_url() {
+        let mut p = profile("");
+        p.extra_env.insert("ANTHROPIC_BASE_URL".into(), "https://gateway.example.com".into());
+        assert_eq!(provider_env(&p, "test-token")["CLAUDE_CODE_THINKING_DISPLAY_UPDATES"], "0");
+        for value in ["0", "1"] {
+            p.extra_env.insert("CLAUDE_CODE_THINKING_DISPLAY_UPDATES".into(), value.into());
+            assert_eq!(provider_env(&p, "test-token")["CLAUDE_CODE_THINKING_DISPLAY_UPDATES"], value);
+        }
+        p.extra_env.insert("CLAUDE_CODE_THINKING_DISPLAY_UPDATES".into(), String::new());
+        assert_eq!(provider_env(&p, "test-token")["CLAUDE_CODE_THINKING_DISPLAY_UPDATES"], "0");
+        p.base_url = "https://api.anthropic.com".into();
+        assert!(!provider_env(&p, "test-token").contains_key("CLAUDE_CODE_THINKING_DISPLAY_UPDATES"));
     }
 
     #[test]

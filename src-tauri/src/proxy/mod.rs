@@ -6,6 +6,7 @@
 //!
 //! 容器内的执行与兜底规则见 docker/rootfs/opt/tdc/tdc-proxy.sh、proxy-guard.sh。
 
+pub mod lan;
 pub mod render;
 pub mod socks5;
 pub mod vless;
@@ -56,7 +57,7 @@ pub struct ProxyNodeView {
 }
 
 /// 单个容器的代理绑定（期望状态）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProxyBinding {
     /// 是否启用代理
@@ -72,8 +73,25 @@ pub struct ProxyBinding {
     pub exit_id: Option<String>,
     /// 放行宿主与局域网直连（默认禁止）
     pub allow_lan: bool,
+    /// 允许直连的私有 IPv4 地址/网段；旧绑定默认保留原来的三个网段。
+    pub lan_cidrs: Vec<String>,
     /// 订阅模式下手动选中的节点名
     pub selected: Option<String>,
+}
+
+impl Default for ProxyBinding {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            legacy_engine: ProxyEngine::default(),
+            node_id: None,
+            static_id: None,
+            exit_id: None,
+            allow_lan: false,
+            lan_cidrs: lan::default_cidrs(),
+            selected: None,
+        }
+    }
 }
 
 /// 持久化文件结构。
@@ -173,9 +191,10 @@ impl ProxyStore {
     }
 
     /// 校验并保存容器绑定。参数：container——容器名；binding——绑定；返回：成功与否。
-    pub fn bind(&self, container: &str, binding: ProxyBinding) -> AppResult<()> {
+    pub fn bind(&self, container: &str, mut binding: ProxyBinding) -> AppResult<()> {
         let mut g = self.data.lock();
         validate_binding(&g.nodes, &binding)?;
+        binding.lan_cidrs = lan::validate(binding.enabled && binding.allow_lan, &binding.lan_cidrs)?;
         g.bindings.insert(container.to_string(), binding);
         write_json_atomic(&self.path, &*g)
     }
@@ -223,6 +242,7 @@ impl ProxyStore {
             static_node.as_ref(),
             exit_node.as_ref(),
             binding.allow_lan,
+            &binding.lan_cidrs,
             binding.selected.as_deref(),
             engine,
         )
@@ -246,6 +266,7 @@ fn migrate_legacy_engine(data: &mut ProxiesFile) {
 /// 校验绑定：启用时节点必填；静态中转必须是 vless、出口必须是 socks5，且都不同于主节点；引用的节点必须存在。
 /// 参数：nodes——节点库；b——绑定；返回：校验结果。
 pub fn validate_binding(nodes: &[ProxyNode], b: &ProxyBinding) -> AppResult<()> {
+    lan::validate(b.enabled && b.allow_lan, &b.lan_cidrs)?;
     let find = |id: &str| nodes.iter().find(|n| n.id == id);
     match b.node_id.as_deref() {
         None if b.enabled => return Err(AppError::Invalid("开启代理必须选择节点".into())),
@@ -323,6 +344,34 @@ fn read_secret(id: &str) -> AppResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lan_binding_defaults_persistence_and_validation() {
+        let old: ProxyBinding = serde_json::from_str(r#"{"allowLan":true}"#).unwrap();
+        assert_eq!(old.lan_cidrs, lan::default_cidrs());
+        assert_eq!(ProxyBinding::default().lan_cidrs, old.lan_cidrs);
+        let dir = std::env::temp_dir().join(format!("tdc-lan-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let store = ProxyStore::load(&dir);
+        store.data.lock().nodes.push(node("n", NodeKind::Socks5));
+        let binding = ProxyBinding {
+            enabled: true,
+            node_id: Some("n".into()),
+            allow_lan: true,
+            lan_cidrs: vec!["192.168.1.20".into(), "10.20.3.4/16".into()],
+            ..Default::default()
+        };
+        store.bind("test", binding.clone()).unwrap();
+        let saved = ProxyStore::load(&dir).binding_of("test").unwrap();
+        assert_eq!(saved.lan_cidrs, ["192.168.1.20/32", "10.20.0.0/16"]);
+        assert!(store.bind("test", ProxyBinding { lan_cidrs: vec!["0.0.0.0/0".into()], ..binding }).is_err());
+        assert_eq!(ProxyStore::load(&dir).binding_of("test").unwrap(), saved);
+        let inactive = ProxyBinding { allow_lan: false, lan_cidrs: vec!["0.0.0.0/0".into()], ..saved };
+        store.bind("test", inactive.clone()).unwrap();
+        assert!(store.bind("test", ProxyBinding { allow_lan: true, ..inactive.clone() }).is_err());
+        assert_eq!(ProxyStore::load(&dir).binding_of("test").unwrap(), inactive);
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     /// 构造节点。参数：id——ID；kind——类型；返回：节点。
     fn node(id: &str, kind: NodeKind) -> ProxyNode {

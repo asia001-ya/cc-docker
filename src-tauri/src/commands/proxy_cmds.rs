@@ -354,6 +354,9 @@ pub(crate) async fn write_bundle(
 ) -> AppResult<()> {
     // 同步运行时脚本后再写期望状态；Xray 二进制只来自镜像（tdc.xray 标签），不在运行时下载。
     for (path, content) in [
+        ("/opt/tdc/lan-policy.json", include_str!("../../../docker/rootfs/opt/tdc/lan-policy.json")),
+        ("/opt/tdc/tdc-lan.mjs", include_str!("../../../docker/rootfs/opt/tdc/tdc-lan.mjs")),
+        ("/opt/tdc/proxy-guard.sh", include_str!("../../../docker/rootfs/opt/tdc/proxy-guard.sh")),
         ("/opt/tdc/tdc-proxy-lib.mjs", include_str!("../../../docker/rootfs/opt/tdc/tdc-proxy-lib.mjs")),
         ("/opt/tdc/tdc-xray.mjs", include_str!("../../../docker/rootfs/opt/tdc/tdc-xray.mjs")),
         ("/opt/tdc/tdc-proxy.sh", include_str!("../../../docker/rootfs/opt/tdc/tdc-proxy.sh")),

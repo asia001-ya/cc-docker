@@ -106,7 +106,7 @@ impl UsageRecord {
     }
 
     pub fn cost_usd(&self) -> f64 {
-        if self.auth_type == "api" && self.attribution == "captured" {
+        if matches!(self.auth_type.as_str(), "api" | "authorization") && self.attribution == "captured" {
             self.pricing.cost(self.input_tokens, self.output_tokens, self.cache_read_tokens, self.cache_write_tokens)
         } else {
             0.0
@@ -160,9 +160,27 @@ impl UsageMetrics {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageGranularity {
+    #[default]
+    Day,
+    Hour,
+}
+
+impl UsageGranularity {
+    pub fn seconds(self) -> i64 {
+        match self {
+            Self::Day => 86_400,
+            Self::Hour => 3600,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UsageQuery {
+    pub granularity: UsageGranularity,
     pub from: Option<i64>,
     pub to: Option<i64>,
     pub container: Option<String>,

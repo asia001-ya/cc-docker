@@ -120,6 +120,7 @@ export const DEMO_PROXY_NODES: ProxyNodeView[] = import.meta.env.DEV ? [
 
 /** 默认设置（与后端 Default 一致） */
 export const DEFAULT_SETTINGS: Settings = {
+  defaultPricing: { pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, modelPricing: mergeBuiltinModelPricing() },
   wallpaper: { ...DEFAULT_WALLPAPER },
   terminal: {
     fontFamily: "JetBrains Mono",

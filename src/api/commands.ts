@@ -8,10 +8,14 @@ import type {
   AccountInfo,
   Candidate,
   ContainerInfo,
+  ContainerEdit,
+  ContainerEditView,
+  ContainerDirectories,
   CreateContainerRequest,
   CreateDefaults,
   EngineInfo,
   ExhaustedPayload,
+  FleetEntry,
   FleetState,
   HostClaudeConfig,
   HostConfigDefaults,
@@ -57,6 +61,12 @@ export const wallpaperDelete = (fileName: string) => invoke<void>("wallpaper_del
 export const engineInfo = () => invoke<EngineInfo>("engine_info");
 export const fleetGet = () => invoke<FleetState>("fleet_get");
 export const fleetRefresh = () => invoke<void>("fleet_refresh");
+export const containerQuotaRefresh = (name: string) => invoke<FleetEntry>("container_quota_refresh", { name });
+export const containerEditGet = (name: string) => invoke<ContainerEditView>("container_edit_get", { name });
+export const containerEditPrecheck = (name: string, config: ContainerEdit) => invoke<Precheck>("container_edit_precheck", { name, config });
+export const containerEditApply = (name: string, config: ContainerEdit, expectedContainerId: string) =>
+  invoke<HostConfigApplyResult>("container_edit_apply", { name, config, expectedContainerId });
+export const containerDirectories = (name: string, path: string) => invoke<ContainerDirectories>("container_directories", { name, path });
 export const containerList = (includeUnmanaged: boolean) => invoke<ContainerInfo[]>("container_list", { includeUnmanaged });
 export const containerDefaults = () => invoke<CreateDefaults>("container_defaults");
 export const containerPrecheck = (req: CreateContainerRequest) => invoke<Precheck>("container_precheck", { req });

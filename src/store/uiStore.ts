@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from "../lib/demo";
 /** 业务弹框类型 */
 export type ModalKind =
   | { kind: "createContainer" }
+  | { kind: "editContainer"; container: string }
   | { kind: "auth"; container: string }
   | { kind: "session"; mode: "new" | "rename"; container?: string; sessionId?: string; split?: "row" | "column" }
   | { kind: "sessionList" }
@@ -18,7 +19,7 @@ export type ModalKind =
   | { kind: "proxy"; container: string }
   | { kind: "hostConfig"; container: string }
   | { kind: "gitSharing"; container: string }
-  | { kind: "settings"; tab?: "appearance" | "wallpaper" | "docker" | "quota" | "providers" | "proxy" | "shortcuts" };
+  | { kind: "settings"; tab?: "appearance" | "wallpaper" | "docker" | "quota" | "providers" | "pricing" | "proxy" | "shortcuts" };
 
 /** 通知 */
 export interface Toast {
@@ -87,6 +88,6 @@ export const useUiStore = create<UiStore>((set) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), tone === "error" ? 8000 : 4500);
   },
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
-  setSettings: (settings) => set({ settings: { ...settings, wallpaper: { ...DEFAULT_SETTINGS.wallpaper, ...settings.wallpaper } } }),
+  setSettings: (settings) => set({ settings: { ...settings, defaultPricing: settings.defaultPricing ?? DEFAULT_SETTINGS.defaultPricing, wallpaper: { ...DEFAULT_SETTINGS.wallpaper, ...settings.wallpaper } } }),
   snooze: (container, v) => set((s) => ({ snoozed: { ...s.snoozed, [container]: v } })),
 }));

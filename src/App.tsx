@@ -41,6 +41,7 @@ import { ActiveOutputReader } from "./components/terminal/OutputReader";
 import { applySettings, dispose, get, pasteClipboard, setKeyHandler, setLinkHandler, sizeOf } from "./components/terminal/xtermPool";
 import { handleTerminalLink } from "./components/terminal/previewActions";
 import { CreateContainerModal } from "./components/modals/CreateContainerModal";
+import { EditContainerModal } from "./components/modals/EditContainerModal";
 import { AuthModal } from "./components/modals/AuthModal";
 import { SessionModal, type NewSessionSpec } from "./components/modals/SessionModal";
 import { SessionListModal } from "./components/modals/SessionListModal";
@@ -600,6 +601,8 @@ export default function App() {
         return <ProxyModal container={modal.container} />;
       case "hostConfig":
         return <HostConfigModal container={modal.container} />;
+      case "editContainer":
+        return <EditContainerModal container={modal.container} />;
       case "gitSharing":
         return <GitSharingModal container={modal.container} />;
       case "settings":

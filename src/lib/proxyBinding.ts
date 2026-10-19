@@ -1,7 +1,8 @@
 import type { ProxyBinding, ProxyEngine, ProxyNodeView } from "../api/types";
+import { DEFAULT_LAN_CIDRS, lanCidrsError } from "./proxyLan";
 
 export const EMPTY_PROXY_BINDING: ProxyBinding = {
-  enabled: false, nodeId: null, staticId: null, exitId: null, allowLan: false, selected: null,
+  enabled: false, nodeId: null, staticId: null, exitId: null, allowLan: false, lanCidrs: [...DEFAULT_LAN_CIDRS], selected: null,
 };
 
 /**
@@ -26,6 +27,10 @@ export function patchProxyBinding(binding: ProxyBinding, patch: Partial<ProxyBin
 }
 
 export function proxyBindingError(binding: ProxyBinding, nodes: ProxyNodeView[]): string | null {
+  return proxyNodeBindingError(binding, nodes) ?? (binding.enabled && binding.allowLan ? lanCidrsError(binding.lanCidrs) : null);
+}
+
+export function proxyNodeBindingError(binding: ProxyBinding, nodes: ProxyNodeView[]): string | null {
   if (!binding.enabled) return null;
   if (!binding.nodeId) return "开启代理必须选择节点";
   const node = nodes.find((n) => n.id === binding.nodeId);

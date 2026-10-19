@@ -29,6 +29,7 @@ const CONTEXT_FILES: &[(&str, &[u8])] = context_files![
     "rootfs/etc/claude-code/managed-settings.json",
     "rootfs/opt/tdc/entrypoint-user.sh",
     "rootfs/opt/tdc/entrypoint.sh",
+    "rootfs/opt/tdc/lan-policy.json",
     "rootfs/opt/tdc/portwatch.sh",
     "rootfs/opt/tdc/proxy-guard.sh",
     "rootfs/opt/tdc/region-options.json",
@@ -39,7 +40,9 @@ const CONTEXT_FILES: &[(&str, &[u8])] = context_files![
     "rootfs/opt/tdc/tdc-host-config.mjs",
     "rootfs/opt/tdc/tdc-git-bridge.mjs",
     "rootfs/opt/tdc/tdc-install-xray.sh",
+    "rootfs/opt/tdc/tdc-lan.mjs",
     "rootfs/opt/tdc/tdc-lib.mjs",
+    "rootfs/opt/tdc/tdc-quota.mjs",
     "rootfs/opt/tdc/tdc-proxy-lib.mjs",
     "rootfs/opt/tdc/tdc-proxy.sh",
     "rootfs/opt/tdc/tdc-session-history.mjs",
@@ -225,14 +228,19 @@ mod tests {
     #[test]
     fn 手工构建只允许与内置上下文相同的公共文件() {
         let ignore = include_str!("../../../docker/.dockerignore");
-        let rules: Vec<_> = ignore.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with('#')).collect();
+        let rules: Vec<_> =
+            ignore.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with('#')).collect();
         assert_eq!(rules.first(), Some(&"**"));
-        let files: Vec<_> = rules.iter().skip(1).filter_map(|rule| {
-            assert!(rule.starts_with('!'));
-            let allowed = &rule[1..];
-            assert!(!allowed.contains('*') && !allowed.contains(".."));
-            (!allowed.ends_with('/')).then_some(allowed)
-        }).collect();
+        let files: Vec<_> = rules
+            .iter()
+            .skip(1)
+            .filter_map(|rule| {
+                assert!(rule.starts_with('!'));
+                let allowed = &rule[1..];
+                assert!(!allowed.contains('*') && !allowed.contains(".."));
+                (!allowed.ends_with('/')).then_some(allowed)
+            })
+            .collect();
         assert_eq!(files.len(), CONTEXT_FILES.len());
         for (file, _) in CONTEXT_FILES {
             assert!(files.contains(file), "公共构建文件未登记到 .dockerignore");

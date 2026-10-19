@@ -131,6 +131,8 @@ pub struct Settings {
     pub quota: QuotaSettings,
     /// Docker 连接
     pub docker: DockerSettings,
+    /// 授权账号用量的参考定价（不代表订阅账单）。
+    pub default_pricing: crate::providers::DefaultPricing,
     /// 侧栏快捷键（ctrl+shift+b / ctrl+b）
     pub sidebar_shortcut: String,
 }
@@ -190,6 +192,10 @@ impl ConfigStore {
         let _ = fs::create_dir_all(&dir);
         let mut settings = read_settings(&dir.join("settings.json"));
         settings.wallpaper.normalize_loaded();
+        settings.default_pricing.normalize();
+        if settings.default_pricing.validate().is_err() {
+            settings.default_pricing = Default::default();
+        }
         if settings.sidebar_shortcut.is_empty() {
             settings.sidebar_shortcut = "ctrl+shift+b".into();
         }
@@ -203,10 +209,12 @@ impl ConfigStore {
     }
 
     /// 覆盖设置并落盘。参数：s——新设置；返回：成功与否。
-    pub fn set_settings(&self, s: Settings) -> AppResult<()> {
+    pub fn set_settings(&self, mut s: Settings) -> AppResult<()> {
         // 与草稿删除共用锁，防止校验后、落盘前资源被清理。
         let mut guard = self.settings.lock();
         s.wallpaper.validate(&self.wallpaper_dir)?;
+        s.default_pricing.normalize();
+        s.default_pricing.validate()?;
         write_json_atomic(&self.dir.join("settings.json"), &s)?;
         *guard = s;
         Ok(())
@@ -279,9 +287,20 @@ fn read_settings(path: &Path) -> Settings {
     if let Ok(settings) = serde_json::from_value(value.clone()) {
         return settings;
     }
-    // 兼容壁纸字段损坏/未来版本格式；不因此丢失其它已有设置。
+    // 独立恢复新增字段，避免其损坏或未来格式导致其它已有设置丢失。
     if let Some(object) = value.as_object_mut() {
-        object.remove("wallpaper");
+        if object
+            .get("wallpaper")
+            .is_some_and(|field| serde_json::from_value::<WallpaperSettings>(field.clone()).is_err())
+        {
+            object.remove("wallpaper");
+        }
+        if object
+            .get("defaultPricing")
+            .is_some_and(|field| serde_json::from_value::<crate::providers::DefaultPricing>(field.clone()).is_err())
+        {
+            object.remove("defaultPricing");
+        }
     }
     serde_json::from_value(value).unwrap_or_default()
 }
@@ -346,6 +365,42 @@ mod tests {
         assert_eq!(s.terminal.theme, "fluent");
         assert_eq!(s.quota.refresh_secs, 5);
         assert_eq!(s.wallpaper, WallpaperSettings::default());
+    }
+
+    #[test]
+    fn 默认定价补齐官方模型且自定义价格可持久化并拒绝负值() {
+        let dir = tmp_dir("default-pricing");
+        let store = ConfigStore::load(dir.clone());
+        let mut settings = store.settings();
+        assert!(settings.default_pricing.model_pricing["claude-sonnet-4-6"].input > 0.0);
+        settings.default_pricing.pricing.input = 7.0;
+        settings.default_pricing.model_pricing.insert("claude-sonnet-4-6".into(), Default::default());
+        store.set_settings(settings.clone()).unwrap();
+        let reloaded = ConfigStore::load(dir.clone());
+        assert_eq!(reloaded.settings().default_pricing, settings.default_pricing);
+        let mut invalid = settings.clone();
+        invalid.default_pricing.pricing.output = -1.0;
+        assert!(store.set_settings(invalid).is_err());
+        assert_eq!(ConfigStore::load(dir).settings().default_pricing, settings.default_pricing);
+    }
+
+    #[test]
+    fn 损坏默认定价不丢失其它设置() {
+        let directory = super::super::wallpaper::tests::TestDirectory::new();
+        fs::write(
+            directory.0.join("settings.json"),
+            r#"{
+            "terminal":{"fontSize":19}, "wallpaper":{"opacity":72},
+            "docker":{"defaultImage":"tdc/test:custom"},
+            "defaultPricing":{"modelPricing":null}
+        }"#,
+        )
+        .unwrap();
+        let settings = ConfigStore::load(directory.0.clone()).settings();
+        assert_eq!(settings.terminal.font_size, 19);
+        assert_eq!(settings.wallpaper.opacity, 72);
+        assert_eq!(settings.docker.default_image, "tdc/test:custom");
+        assert_eq!(settings.default_pricing, Default::default());
     }
 
     #[test]

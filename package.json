@@ -1,7 +1,7 @@
 {
   "name": "tht-docker-claude",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Claude 多容器终端管理器（终端至上的 Windows 桌面端）",
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "test:outputs": "node --test tests/output-reader.test.mjs",
     "test:statusline": "node --test docker/tests/statusline-display-tests.mjs",
     "test:git-sharing": "node --test docker/tests/git-bridge-tests.mjs",
-    "test:docker": "node --test docker/tests/run-tests.mjs docker/tests/xray-tests.mjs docker/tests/claude-launcher-tests.mjs docker/tests/session-history-tests.mjs docker/tests/host-config-tests.mjs docker/tests/usage-attribution-tests.mjs",
+    "test:provider-resume": "node --test docker/tests/provider-resume-tests.mjs",
+    "test:docker": "node --test docker/tests/run-tests.mjs docker/tests/lan-tests.mjs docker/tests/quota-tests.mjs docker/tests/directory-picker-tests.mjs docker/tests/xray-tests.mjs docker/tests/claude-launcher-tests.mjs docker/tests/session-history-tests.mjs docker/tests/host-config-tests.mjs docker/tests/usage-attribution-tests.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

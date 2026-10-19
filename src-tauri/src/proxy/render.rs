@@ -32,8 +32,6 @@ pub const CONTROLLER_SOCK: &str = "/var/lib/tdc/proxy/mihomo.sock";
 pub const BOOTSTRAP_DNS: [&str; 2] = ["https://223.5.5.5/dns-query", "https://1.12.12.12/dns-query"];
 /// 解析目标域名的 DNS（respect-rules 下经节点发出）。
 pub const REMOTE_DNS: [&str; 2] = ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"];
-/// 不进入 TUN 的网段：端口映射回包、宿主与局域网（是否允许新建直连由兜底规则决定）。
-pub const ROUTE_EXCLUDE: [&str; 4] = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"];
 /// 订阅刷新间隔（秒）。
 pub const SUBSCRIPTION_INTERVAL: u64 = 86_400;
 
@@ -90,7 +88,15 @@ pub fn render(
     allow_lan: bool,
     selected: Option<&str>,
 ) -> AppResult<Rendered> {
-    render_with_engine(node, static_node, exit_node, allow_lan, selected, ProxyEngine::Mihomo)
+    render_with_engine(
+        node,
+        static_node,
+        exit_node,
+        allow_lan,
+        &super::lan::default_cidrs(),
+        selected,
+        ProxyEngine::Mihomo,
+    )
 }
 
 pub fn render_with_engine(
@@ -98,9 +104,11 @@ pub fn render_with_engine(
     static_node: Option<&ResolvedNode>,
     exit_node: Option<&ResolvedNode>,
     allow_lan: bool,
+    lan_cidrs: &[String],
     selected: Option<&str>,
     engine: ProxyEngine,
 ) -> AppResult<Rendered> {
+    let lan_cidrs = super::lan::validate(allow_lan, lan_cidrs)?;
     if node.secret.trim().is_empty() {
         return Err(AppError::Invalid(format!("节点「{}」缺少订阅地址或链接", node.name)));
     }
@@ -198,7 +206,7 @@ pub fn render_with_engine(
             "strict-route": true,
             "auto-detect-interface": true,
             "dns-hijack": ["any:53", "tcp://any:53"],
-            "route-exclude-address": ROUTE_EXCLUDE,
+            "route-exclude-address": super::lan::route_exclusions(),
         },
         "proxies": proxies,
         "proxy-providers": providers,
@@ -224,7 +232,7 @@ pub fn render_with_engine(
     }
     let intent_selected =
         if engine == ProxyEngine::Xray && node.kind != NodeKind::Subscription { None } else { intent_selected };
-    let intent = json!({ "enabled": true, "engine": engine, "allow_lan": allow_lan, "selected": intent_selected });
+    let intent = json!({ "enabled": true, "engine": engine, "allow_lan": allow_lan, "lan_cidrs": lan_cidrs, "selected": intent_selected });
     Ok(Rendered { config, intent })
 }
 
@@ -244,6 +252,26 @@ fn node_proxy_name(name: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn lan_exceptions_never_change_public_proxy_routing() {
+        let node = n("test", NodeKind::Socks5, "socks5://127.0.0.1:1080");
+        let cidrs = vec!["192.168.1.20".into(), "10.20.3.4/16".into()];
+        for engine in [ProxyEngine::Mihomo, ProxyEngine::Xray] {
+            let rendered = render_with_engine(&node, None, None, true, &cidrs, None, engine).unwrap();
+            assert_eq!(rendered.intent["lan_cidrs"], json!(["192.168.1.20/32", "10.20.0.0/16"]));
+            assert_eq!(rendered.config["rules"], json!(["MATCH,NODE"]));
+            assert_eq!(rendered.config["tun"]["route-exclude-address"], json!(super::super::lan::route_exclusions()));
+            assert_eq!(rendered.config["dns"]["respect-rules"], true);
+            assert_eq!(rendered.config["ipv6"], false);
+            assert!(render_with_engine(&node, None, None, true, &["0.0.0.0/0".into()], None, engine).is_err());
+            assert!(render_with_engine(&node, None, None, true, &[], None, engine).is_err());
+            let inactive = render_with_engine(&node, None, None, false, &["0.0.0.0/0".into()], None, engine).unwrap();
+            assert_eq!(inactive.intent["allow_lan"], false);
+            assert_eq!(inactive.config["rules"], rendered.config["rules"]);
+            assert_eq!(inactive.config["tun"], rendered.config["tun"]);
+        }
+    }
+
     const VLESS_A: &str =
         "vless://b831381d-6324-4d53-ad4f-8cda48b30811@a.example.com:443?security=tls&type=ws&path=%2Fa";
     const VLESS_S: &str =
@@ -254,8 +282,16 @@ mod tests {
         let node = n("DMIT", NodeKind::Subscription, "https://sub.example.com/api?token=secret");
         let relay = n("中转", NodeKind::Vless, VLESS_S);
         let exit = n("出口", NodeKind::Socks5, "socks5://u:p@exit.test:1080");
-        let result =
-            render_with_engine(&node, Some(&relay), Some(&exit), false, Some("香港 01"), ProxyEngine::Xray).unwrap();
+        let result = render_with_engine(
+            &node,
+            Some(&relay),
+            Some(&exit),
+            false,
+            &super::super::lan::default_cidrs(),
+            Some("香港 01"),
+            ProxyEngine::Xray,
+        )
+        .unwrap();
         assert_eq!(result.intent["engine"], "xray");
         assert_eq!(result.intent["selected"], "香港 01");
         assert_eq!(result.config["tdc-xray"]["node"]["secret"], node.secret);
@@ -270,9 +306,16 @@ mod tests {
     #[test]
     fn xray_单节点保留pqv且不沿用mihomo节点名() {
         let link = format!("{VLESS_S}&pqv=complete-post-quantum-verification-key#original-name");
-        let result =
-            render_with_engine(&n("我的节点", NodeKind::Vless, &link), None, None, true, None, ProxyEngine::Xray)
-                .unwrap();
+        let result = render_with_engine(
+            &n("我的节点", NodeKind::Vless, &link),
+            None,
+            None,
+            true,
+            &super::super::lan::default_cidrs(),
+            None,
+            ProxyEngine::Xray,
+        )
+        .unwrap();
         assert_eq!(result.config["tdc-xray"]["node"]["secret"], link);
         assert!(result.intent["selected"].is_null());
         assert_eq!(result.intent["allow_lan"], true);
@@ -295,7 +338,10 @@ mod tests {
         assert_eq!(c["proxy-groups"][0]["use"][0], "sub");
         assert_eq!(c["rules"][0], "MATCH,NODE");
         assert_eq!(c["proxies"].as_array().unwrap().len(), 0);
-        assert_eq!(r.intent, json!({ "enabled": true, "engine": "mihomo", "allow_lan": false, "selected": null }));
+        assert_eq!(
+            r.intent,
+            json!({ "enabled": true, "engine": "mihomo", "allow_lan": false, "lan_cidrs": super::super::lan::default_cidrs(), "selected": null })
+        );
     }
 
     #[test]

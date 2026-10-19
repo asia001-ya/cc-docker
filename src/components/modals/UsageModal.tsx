@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { containerList, errorText, isTauri, usageEnable, usageQuery, usageRefresh } from "../../api/commands";
 import type { ContainerInfo, UsageAuthType, UsageCollectionContainer, UsageContainerSummary, UsageLog, UsageMetrics, UsageQuery, UsageResult, UsageTrendPoint } from "../../api/types";
-import { displayUsageTrend, formatUsageCompact, formatUsageCost, formatUsageNumber, formatUsagePercent, formatUsageSpeed, localDateInput, partitionUsageContainers, usageDateRange, USAGE_RANGES, ZERO_USAGE, type TrendMetric, type UsageRange } from "../../lib/usage";
+import { displayUsageTrend, trendTimestamp, formatUsageCompact, formatUsageCost, formatUsageNumber, formatUsagePercent, formatUsageSpeed, localDateInput, partitionUsageContainers, usageDateRange, USAGE_RANGES, ZERO_USAGE, type TrendMetric, type UsageRange } from "../../lib/usage";
 import { queryUsageDemo } from "../../lib/usageDemo";
 import { useFleetStore } from "../../store/fleetStore";
 import { useUiStore } from "../../store/uiStore";
@@ -9,7 +9,7 @@ import { Modal } from "../ui/Modal";
 import { Button, Callout, Icon, Input, Select } from "../ui/controls";
 
 const AUTH_LABEL: Record<UsageAuthType, string> = { api: "API", authorization: "授权", unknown: "未知" };
-const TREND_METRICS: { value: TrendMetric; label: string }[] = [{ value: "costUsd", label: "成本" }, { value: "requests", label: "请求" }, { value: "totalTokens", label: "Token" }];
+const TREND_METRICS: { value: TrendMetric; label: string }[] = [{ value: "totalTokens", label: "Token" }, { value: "requests", label: "请求" }, { value: "costUsd", label: "成本" }];
 type ContainerPresence = "current" | "archived" | "unknown";
 
 function timestampText(value: number | null): string {
@@ -36,7 +36,7 @@ function StatCard({ label, value, detail, icon, accent = false }: { label: strin
 function SummaryCards({ metrics }: { metrics: UsageMetrics }) {
   const input = metrics.inputTokens + metrics.cacheReadTokens + metrics.cacheWriteTokens;
   return <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-6">
-    <StatCard label="估算费用 · USD" value={formatUsageCost(metrics.costUsd)} detail="按请求所属供应商的当前定价重算" icon="payments" accent />
+    <StatCard label="估算费用 · USD" value={formatUsageCost(metrics.costUsd)} detail="API 用供应商定价，授权用默认定价" icon="payments" accent />
     <StatCard label="请求数" value={formatUsageNumber(metrics.requests)} detail="有 token 记录的模型响应" icon="swap_vert" />
     <StatCard label="Token 总量" value={formatUsageCompact(metrics.totalTokens)} detail={`输入 ${formatUsageNumber(metrics.inputTokens)} · 输出 ${formatUsageNumber(metrics.outputTokens)}`} icon="token" />
     <StatCard label="缓存读取 token" value={formatUsageCompact(metrics.cacheReadTokens)} detail="命中已有缓存的输入" icon="cached" />
@@ -45,8 +45,10 @@ function SummaryCards({ metrics }: { metrics: UsageMetrics }) {
   </div>;
 }
 
-function TrendChart({ points, monthly }: { points: UsageTrendPoint[]; monthly: boolean }) {
-  const [metric, setMetric] = useState<TrendMetric>("costUsd");
+function TrendChart({ points, metric, setMetric, granularity, setGranularity }: {
+  points: UsageTrendPoint[]; metric: TrendMetric; setMetric: (metric: TrendMetric) => void;
+  granularity: "day" | "hour"; setGranularity: (granularity: "day" | "hour") => void;
+}) {
   const [highlighted, setHighlighted] = useState<number | null>(null);
   const [showTable, setShowTable] = useState(false);
   const width = 960;
@@ -57,7 +59,9 @@ function TrendChart({ points, monthly }: { points: UsageTrendPoint[]; monthly: b
   const bottom = 30;
   const maximum = points.reduce((value, point) => Math.max(value, point.metrics[metric]), 0);
   const ceiling = maximum || 1;
-  const x = (index: number) => left + (points.length === 1 ? (width - left - right) / 2 : index / Math.max(points.length - 1, 1) * (width - left - right));
+  const times = points.map((point) => trendTimestamp(point.date));
+  const span = times.length > 1 ? times[times.length - 1] - times[0] : 0;
+  const x = (index: number) => left + (span === 0 ? 0.5 : (times[index] - times[0]) / span) * (width - left - right);
   const y = (value: number) => height - bottom - value / ceiling * (height - top - bottom);
   const format = (value: number) => metric === "costUsd" ? formatUsageCost(value) : formatUsageCompact(value);
   const selected = highlighted === null ? null : points[highlighted];
@@ -67,8 +71,13 @@ function TrendChart({ points, monthly }: { points: UsageTrendPoint[]; monthly: b
 
   return <section aria-label="使用趋势" className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="flex items-center gap-2"><Icon name="show_chart" className="text-accent" /><h2 className="text-headline-sm">使用趋势</h2><span className="text-label-sm text-outline">按{monthly ? "月" : "天"}</span></div>
+      <div className="flex items-center gap-2"><Icon name="show_chart" className="text-accent" /><h2 className="text-headline-sm">使用趋势</h2><span className="text-label-sm text-outline">按{granularity === "hour" ? "小时" : "天"}</span></div>
       <div className="flex items-center gap-3">
+        <div className="flex rounded-lg bg-black/15 p-0.5" aria-label="趋势时间粒度">
+          {(["day", "hour"] as const).map((value) => <button key={value} type="button" aria-pressed={granularity === value}
+            className={"rounded px-2.5 py-1 text-body-sm " + (granularity === value ? "bg-accent/15 text-accent" : "text-on-surface-variant hover:bg-white/[0.06]")}
+            onClick={() => { setGranularity(value); setHighlighted(null); }}>{value === "day" ? "按天" : "按小时"}</button>)}
+        </div>
         <div className="flex rounded-lg bg-black/15 p-0.5" aria-label="趋势指标">
           {TREND_METRICS.map((item) => <button key={item.value} type="button" aria-pressed={metric === item.value} className={`rounded px-2.5 py-1 text-body-sm ${metric === item.value ? "bg-accent/15 text-accent" : "text-on-surface-variant hover:bg-white/[0.06]"}`} onClick={() => { setMetric(item.value); setHighlighted(null); }}>{item.label}</button>)}
         </div>
@@ -85,7 +94,7 @@ function TrendChart({ points, monthly }: { points: UsageTrendPoint[]; monthly: b
       </g>)}
       <path d={area} fill="var(--color-accent, #60cdff)" fillOpacity="0.07" />
       <path d={path} fill="none" stroke="currentColor" className="text-accent" strokeWidth="2.5" strokeLinejoin="round" />
-      {ticks.map((index) => <text key={index} x={x(index)} y={height - 6} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fill="currentColor" className="text-outline" fontSize="11">{monthly ? points[index].date : points[index].date.slice(5)}</text>)}
+      {ticks.map((index) => <text key={index} x={x(index)} y={height - 6} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fill="currentColor" className="text-outline" fontSize="11">{points[index].date.slice(5).replace("T", " ")}</text>)}
       {points.map((point, index) => <g key={point.date}>
         {highlighted === index && <line x1={x(index)} y1={top} x2={x(index)} y2={height - bottom} stroke="currentColor" className="text-accent" strokeOpacity="0.3" strokeDasharray="3 3" />}
         <circle cx={x(index)} cy={y(point.metrics[metric])} r={highlighted === index || points.length === 1 ? 4 : 0} fill="currentColor" className="text-accent" />
@@ -95,7 +104,7 @@ function TrendChart({ points, monthly }: { points: UsageTrendPoint[]; monthly: b
       </g>)}
     </svg> : <div className="flex h-28 items-center justify-center text-body-sm text-outline">采集到用量后将在这里显示趋势</div>}
     {showTable && <div className="mt-3 max-h-48 overflow-auto rounded-lg border border-white/[0.07]">
-      <table className="w-full text-right font-mono text-code-sm"><caption className="sr-only">趋势数据，按{monthly ? "月" : "天"}汇总</caption><thead className="sticky top-0 bg-surface-container-high"><tr><th className="px-3 py-2 text-left">日期</th><th className="px-3 py-2">成本 · USD</th><th className="px-3 py-2">请求</th><th className="px-3 py-2">Token</th></tr></thead><tbody>{points.map((point) => <tr key={point.date} className="border-t border-white/[0.05]"><td className="px-3 py-1.5 text-left">{point.date}</td><td className="px-3 py-1.5">{formatUsageCost(point.metrics.costUsd)}</td><td className="px-3 py-1.5">{formatUsageNumber(point.metrics.requests)}</td><td className="px-3 py-1.5">{formatUsageNumber(point.metrics.totalTokens)}</td></tr>)}</tbody></table>
+      <table className="w-full text-right font-mono text-code-sm"><caption className="sr-only">趋势数据，按{granularity === "hour" ? "小时" : "天"}汇总</caption><thead className="sticky top-0 bg-surface-container-high"><tr><th className="px-3 py-2 text-left">日期</th><th className="px-3 py-2">成本 · USD</th><th className="px-3 py-2">请求</th><th className="px-3 py-2">Token</th></tr></thead><tbody>{points.map((point) => <tr key={point.date} className="border-t border-white/[0.05]"><td className="px-3 py-1.5 text-left">{point.date}</td><td className="px-3 py-1.5">{formatUsageCost(point.metrics.costUsd)}</td><td className="px-3 py-1.5">{formatUsageNumber(point.metrics.requests)}</td><td className="px-3 py-1.5">{formatUsageNumber(point.metrics.totalTokens)}</td></tr>)}</tbody></table>
     </div>}
   </section>;
 }
@@ -141,6 +150,8 @@ export function UsageModal({ initialContainer, onClose }: { initialContainer?: s
   const [liveContainers, setLiveContainers] = useState<Pick<ContainerInfo, "name" | "running">[] | null>(null);
   const [container, setContainer] = useState(initialContainer ?? "");
   const [range, setRange] = useState<UsageRange>("7d");
+  const [metric, setMetric] = useState<TrendMetric>("totalTokens");
+  const [granularity, setGranularity] = useState<"day" | "hour">("day");
   const [start, setStart] = useState(() => { const date = new Date(); date.setDate(date.getDate() - 6); return localDateInput(date); });
   const [end, setEnd] = useState(() => localDateInput());
   const [authType, setAuthType] = useState<UsageAuthType | "">("");
@@ -159,8 +170,8 @@ export function UsageModal({ initialContainer, onClose }: { initialContainer?: s
   const loadingRef = useRef(false);
   const mounted = useRef(true);
   const dateRange = useMemo(() => usageDateRange(range, start, end), [range, start, end, refreshTick]);
-  const query = useMemo<UsageQuery>(() => ({ from: dateRange.from, to: dateRange.to, utcOffsetMinutes: dateRange.utcOffsetMinutes,
-    container: container || undefined, authType: authType || undefined, providerId: providerId || undefined, model: model || undefined, page, pageSize }), [dateRange.from, dateRange.to, dateRange.utcOffsetMinutes, container, authType, providerId, model, page, pageSize]);
+  const query = useMemo<UsageQuery>(() => ({ from: dateRange.from, to: dateRange.to, utcOffsetMinutes: dateRange.utcOffsetMinutes, granularity,
+    container: container || undefined, authType: authType || undefined, providerId: providerId || undefined, model: model || undefined, page, pageSize }), [dateRange.from, dateRange.to, dateRange.utcOffsetMinutes, granularity, container, authType, providerId, model, page, pageSize]);
   const previousQuery = useRef(query);
 
   useEffect(() => {
@@ -269,7 +280,7 @@ export function UsageModal({ initialContainer, onClose }: { initialContainer?: s
         {selectedPresence === "current" && selected?.collection.status === "unsupported" && <Callout tone="warning">该容器尚未启用采集。使用支持用量采集的镜像启动新会话后，后续请求会自动记录；已导入历史请在总览中查看。</Callout>}
         {selectedPresence === "current" && selected?.collection.status === "error" && <Callout tone="danger">该容器采集失败：{selected.collection.error || "请检查容器状态后重试。"}</Callout>}
         {data.totals.requests === 0 && <div className="rounded-lg border border-dashed border-white/10 px-4 py-3 text-body-sm text-on-surface-variant">{hasFilters ? "当前筛选没有使用记录。可清除筛选或扩大日期范围。" : "所选区间尚无已采集的使用记录。新请求采集后会出现在这里，已保存的记录会在容器停止后继续保留。"}</div>}
-        <TrendChart points={trend.points} monthly={trend.monthly} />
+        <TrendChart points={trend.points} metric={metric} setMetric={setMetric} granularity={granularity} setGranularity={setGranularity} />
         {!container ? <div className="space-y-4">
           <section aria-label={currentContainerNames === null ? "容器用量（状态未确认）" : "当前容器用量"}>
             <div className="mb-3 flex items-center justify-between gap-3"><h2 className="flex items-center gap-2 text-headline-sm"><Icon name="deployed_code" className="text-accent" />{currentContainerNames === null ? "容器用量（状态未确认）" : "当前容器用量"} <span className="text-label-sm text-outline">{overviewContainers.length}</span></h2><span className="text-body-sm text-outline">点击卡片查看详情与日志</span></div>
@@ -290,7 +301,9 @@ export function UsageModal({ initialContainer, onClose }: { initialContainer?: s
             <label className="flex items-center gap-2">每页<Select aria-label="每页日志数" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} className="w-20"><option value={25}>25 条</option><option value={50}>50 条</option><option value={100}>100 条</option></Select></label>
             <div className="flex items-center gap-3"><span>第 {data.page} / {totalPages} 页</span><Button icon="chevron_left" aria-label="上一页日志" disabled={loading || data.page <= 1} onClick={() => setPage(data.page - 1)}>上一页</Button><Button icon="chevron_right" aria-label="下一页日志" disabled={loading || data.page >= totalPages} onClick={() => setPage(data.page + 1)}>下一页</Button></div>
           </div>
-          <p className="text-label-sm leading-relaxed text-outline">费用按请求所属供应商的当前定价重新估算；供应商已删除时沿用请求保存的价格。授权、未填价格及无法确定供应商的历史记录记为 $0；未记录可靠耗时时，速度显示为「—」。请求数仅统计已记录 token 的模型响应。</p>
+          <p className="text-label-sm leading-relaxed text-outline">API 费用按请求所属供应商的当前定价估算；供应商已删除时沿用请求保存的价格。授权请求按默认定价估算等值 API 费用，不代表订阅扣费。未知历史及未填价格记为 $0；未记录可靠耗时时速度显示为「—」。
+            <button type="button" className="ml-2 text-accent hover:underline" onClick={() => useUiStore.getState().openModal({ kind: "settings", tab: "pricing" })}>编辑默认定价</button>
+          </p>
         </section>}
       </>}
     </div>

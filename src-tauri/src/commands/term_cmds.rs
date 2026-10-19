@@ -286,7 +286,13 @@ pub async fn switch_execute(state: State<'_, AppState>, req: SwitchRequest) -> A
 
     let target = docker.get(&req.target).await?;
     if !target.running {
-        docker.start(&req.target).await?;
+        // 与普通启动一致，先写供应商配置再启动，避免新建但未启动的 API
+        // 容器以入口脚本的默认订阅模式恢复对话。
+        super::container_cmds::start_with_config(&state, &docker, &req.target).await?;
+    } else if state.providers.binding_of(&req.target).is_some() {
+        // API 供应商可能在上次启动后更新；源会话退出前完成同步，让旧容器
+        // 也能取得当前凭据和兼容设置。未托管的容器配置保持原有读取方式。
+        super::container_cmds::sync_provider_files(&state.providers, &docker, &req.target, true).await?;
     }
     let dir_ok = docker.exec(&req.target, &["test", "-d", &preflight_cwd], None).await?.exit_code == Some(0);
     if !dir_ok {

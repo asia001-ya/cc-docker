@@ -2,7 +2,7 @@
 //!
 //! 用法：
 //!   cargo run --example render_proxy -- <输出目录> <节点类型 subscription|vless|socks5> <节点地址>
-//!       [--static=<vless 链接>] [--exit=<socks5 链接>] [--allow-lan]
+//!       [--static=<vless 链接>] [--exit=<socks5 链接>] [--allow-lan] [--lan-cidr=<私有 IP/CIDR>] [--engine=mihomo|xray]
 //! 输出：<输出目录>/config.yaml 与 <输出目录>/intent.json
 
 use std::path::PathBuf;
@@ -32,7 +32,9 @@ fn main() {
     let static_node = opt("static").map(|s| ResolvedNode { name: "中转".into(), kind: NodeKind::Vless, secret: s });
     let exit_node = opt("exit").map(|s| ResolvedNode { name: "出口".into(), kind: NodeKind::Socks5, secret: s });
     let engine = if opt("engine").as_deref() == Some("xray") { ProxyEngine::Xray } else { ProxyEngine::Mihomo };
-    let out = render_with_engine(&node, static_node.as_ref(), exit_node.as_ref(), allow_lan, None, engine)
+    let cidrs: Vec<String> = args.iter().filter_map(|a| a.strip_prefix("--lan-cidr=").map(str::to_string)).collect();
+    let cidrs = if cidrs.is_empty() { tdc_lib::proxy::lan::default_cidrs() } else { cidrs };
+    let out = render_with_engine(&node, static_node.as_ref(), exit_node.as_ref(), allow_lan, &cidrs, None, engine)
         .unwrap_or_else(|e| {
             eprintln!("渲染失败：{e}");
             std::process::exit(1);

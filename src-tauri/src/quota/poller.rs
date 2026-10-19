@@ -53,6 +53,29 @@ pub struct FleetEntry {
     pub proxy: Option<ProxyStatus>,
 }
 
+impl FleetEntry {
+    /// Apply a confirmed account refresh to all quota-derived fields together.
+    pub fn update_quota(&mut self, quota: QuotaSnapshot, now: i64, settings: &QuotaSettings) {
+        self.quota = Some(quota);
+        self.limit_hit = false;
+        let input = QuotaInput {
+            name: self.container.name.clone(),
+            running: self.container.running,
+            auth_mode: self
+                .provider
+                .as_ref()
+                .map(|provider| provider.mode.clone())
+                .filter(|mode| !mode.is_empty())
+                .unwrap_or_else(|| self.container.auth_mode.clone()),
+            quota: self.quota.clone(),
+            limit_hit: false,
+        };
+        self.health = health_of(&input, now, settings);
+        self.remaining = remaining_of(self.quota.as_ref(), now);
+        self.blocked_until = blocked_until(self.quota.as_ref(), now, settings.switch_threshold);
+    }
+}
+
 /// 全部容器视图。
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -150,6 +173,9 @@ pub async fn poll_once(
     let snaps = futures_util::future::join_all(containers.iter().map(|c| async move {
         if !c.running {
             return (c.name.clone(), Ok(None));
+        }
+        if let Err(error) = super::runtime::ensure(docker, &c.id).await {
+            return (c.name.clone(), Err(error.to_string()));
         }
         match docker.tdc_ctl(&c.name, &["snapshot"]).await {
             Ok(v) => {
@@ -261,5 +287,58 @@ pub async fn run_loop<D, S>(
             _ = tokio::time::sleep(Duration::from_secs(secs)) => {}
             _ = wake.notified() => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quota::model::QuotaWindow;
+
+    #[test]
+    fn 账号刷新同时更新摘要健康度和限额标记() {
+        let mut entry = FleetEntry {
+            container: ContainerInfo {
+                id: "fixture".into(),
+                name: "fixture".into(),
+                image: "tdc/claude-dev:test".into(),
+                state: "running".into(),
+                status: "Up".into(),
+                running: true,
+                slot: 1,
+                auth_mode: "subscription".into(),
+                provider_id: None,
+                shared_group: String::new(),
+                ports: Vec::new(),
+                mounts: Vec::new(),
+            },
+            health: Health::Exhausted,
+            remaining: Some(Remaining { remaining: 0.0, inferred: false }),
+            quota: None,
+            blocked_until: Some(300),
+            account: None,
+            provider: None,
+            ports: Vec::new(),
+            sessions: Vec::new(),
+            error: None,
+            limit_hit: true,
+            proxy: None,
+        };
+        let quota = QuotaSnapshot {
+            five_hour: Some(QuotaWindow { used_percentage: 10.0, resets_at: Some(200) }),
+            seven_day: Some(QuotaWindow { used_percentage: 20.0, resets_at: Some(300) }),
+            ..Default::default()
+        };
+        entry.update_quota(quota.clone(), 100, &QuotaSettings::default());
+        assert_eq!(entry.quota, Some(quota));
+        assert_eq!(entry.health, Health::Healthy);
+        assert_eq!(entry.remaining, Some(Remaining { remaining: 80.0, inferred: false }));
+        assert!(!entry.limit_hit);
+        assert_eq!(entry.blocked_until, None);
+
+        let settings = QuotaSettings { switch_threshold: 15.0, ..Default::default() };
+        entry.update_quota(entry.quota.clone().unwrap(), 100, &settings);
+        assert_eq!(entry.health, Health::Exhausted);
+        assert_eq!(entry.blocked_until, Some(300));
     }
 }

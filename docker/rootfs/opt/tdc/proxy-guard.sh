@@ -36,27 +36,37 @@ RESOLVER="${TDC_PROXY_RESOLVER:-1.1.1.1}"
 CHAIN=TDC_GUARD
 MARK="# tdc-proxy"
 DOCKER_DNS=127.0.0.11
-PRIVATE_NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16)
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+LAN_CIDRS=()
+
+# Missing lan_cidrs preserves old intents; explicit empty/invalid lists fail closed.
+load_lan_cidrs() {
+  local cidrs
+  LAN_CIDRS=()
+  (( $1 )) || return 0
+  cidrs=$(node "$SCRIPT_DIR/tdc-lan.mjs" guard-cidrs "$PROXY_DIR/intent.json") || return 1
+  mapfile -t LAN_CIDRS <<< "$cidrs"
+}
 
 # 函数：输出 IPv4 兜底链的规则（每行一条，不含 "-A 链名"）
 # 参数：$1 是否放行私有网段（1 / 0）
 # 输出：规则参数序列
 rule_specs_v4() {
   local allow_lan=$1 net
-  echo "-o lo -d $DOCKER_DNS -m owner ! --uid-owner 0 -j REJECT"
+  echo "-d $DOCKER_DNS/32 -o lo -m owner ! --uid-owner 0 -j REJECT --reject-with icmp-port-unreachable"
   echo "-o lo -j RETURN"
-  echo "-m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j RETURN"
+  echo "-m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j RETURN"
   echo "-o $TUN_DEV -j RETURN"
   echo "-m owner --uid-owner 0 -j RETURN"
   if (( allow_lan )); then
     # 私有网段放行，但其中的 53 端口仍拒绝，防止经局域网 DNS 泄露
-    for net in "${PRIVATE_NETS[@]}"; do
-      echo "-d $net -p udp --dport 53 -j REJECT"
-      echo "-d $net -p tcp --dport 53 -j REJECT"
+    for net in "${LAN_CIDRS[@]}"; do
+      echo "-d $net -p udp -m udp --dport 53 -j REJECT --reject-with icmp-port-unreachable"
+      echo "-d $net -p tcp -m tcp --dport 53 -j REJECT --reject-with icmp-port-unreachable"
     done
-    for net in "${PRIVATE_NETS[@]}"; do echo "-d $net -j RETURN"; done
+    for net in "${LAN_CIDRS[@]}"; do echo "-d $net -j RETURN"; done
   fi
-  echo "-j REJECT"
+  echo "-j REJECT --reject-with icmp-port-unreachable"
 }
 
 # 函数：输出 IPv6 兜底链的规则（容器已用 sysctl 关闭 IPv6，这里是冗余防线）
@@ -173,6 +183,7 @@ cmd_apply() {
   local allow_lan=$1
   mkdir -p "$PROXY_DIR"
   barrier add || { echo "proxy-guard: 无法插入屏障规则（iptables 不可用？）" >&2; return 1; }
+  load_lan_cidrs "$allow_lan" || { echo "proxy-guard: 内网配置无效，保留屏障（网络保持断开）" >&2; return 1; }
   restore_resolv
   strip_hosts
   inject_hosts
@@ -198,15 +209,19 @@ cmd_remove() {
   return 0
 }
 
-# 函数：检查兜底是否完整（链已挂载、规则条数正确、resolv.conf 已改写）
+# 函数：检查兜底是否完整（逐条比较规则及顺序，避免同数量网段替换后误判为已生效）
 # 参数：$1 是否放行私有网段（1 / 0）
 # 返回：0 完整，1 不完整
 cmd_check() {
   local allow_lan=$1 expected actual
+  load_lan_cidrs "$allow_lan" || return 1
   "$IPT" -C OUTPUT -j "$CHAIN" 2>/dev/null || return 1
-  expected=$(rule_specs_v4 "$allow_lan" | wc -l)
-  actual=$("$IPT" -S "$CHAIN" 2>/dev/null | grep -c '^-A ')
-  (( expected == actual )) || return 1
+  # An earlier failed update may have retained the barrier; the daemon must repair it.
+  if "$IPT" -C OUTPUT -m owner ! --uid-owner 0 -j REJECT 2>/dev/null; then return 1; fi
+  expected=$(rule_specs_v4 "$allow_lan" | sed "s/^/-A $CHAIN /")
+  actual=$("$IPT" -S "$CHAIN" 2>/dev/null) || return 1
+  actual=$(printf '%s\n' "$actual" | grep '^-A ')
+  [[ "$expected" == "$actual" ]] || return 1
   grep -q "$MARK" "$RESOLV" 2>/dev/null
 }
 
@@ -216,7 +231,9 @@ case "${1:-}" in
   check) shift; cmd_check "$(parse_allow_lan "$@")" ;;
   --print)
     shift
-    rule_specs_v4 "$(parse_allow_lan "$@")" | sed "s/^/iptables -A $CHAIN /"
+    allow_lan=$(parse_allow_lan "$@")
+    load_lan_cidrs "$allow_lan" || exit 2
+    rule_specs_v4 "$allow_lan" | sed "s/^/iptables -A $CHAIN /"
     rule_specs_v6 | sed "s/^/ip6tables -A $CHAIN /"
     ;;
   *)

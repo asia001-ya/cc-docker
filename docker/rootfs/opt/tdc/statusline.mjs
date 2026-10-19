@@ -18,6 +18,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { renderStatusLine } from "./statusline-display.mjs";
 import { getSessionTitle } from "./tdc-session-history.mjs";
+import { mergeLimits, withQuotaLock } from "./tdc-quota.mjs";
 export { renderStatusLine } from "./statusline-display.mjs";
 
 export const PROTOCOL_VERSION = 1;
@@ -75,18 +76,13 @@ export function detectAuthHint(env) {
 export function buildQuotaSnapshot(previous, input, env, nowSec) {
   const prev = previous && previous.protocol === PROTOCOL_VERSION ? previous : null;
   const limits = input && typeof input.rate_limits === "object" && input.rate_limits ? input.rate_limits : {};
-  const fiveHour = parseWindow(limits.five_hour);
-  const sevenDay = parseWindow(limits.seven_day);
-  const gotFresh = fiveHour !== null || sevenDay !== null;
 
   return {
     protocol: PROTOCOL_VERSION,
     updated_at: nowSec,
-    rate_limits_updated_at: gotFresh ? nowSec : prev?.rate_limits_updated_at ?? null,
+    ...mergeLimits(prev, limits, nowSec),
     container: env.TDC_CONTAINER_NAME || prev?.container || null,
     auth_hint: detectAuthHint(env),
-    five_hour: fiveHour ?? prev?.five_hour ?? null,
-    seven_day: sevenDay ?? prev?.seven_day ?? null,
     model: pickModel(input) ?? prev?.model ?? null,
     claude_version: typeof input?.version === "string" ? input.version : prev?.claude_version ?? null,
     last_session: {
@@ -254,7 +250,7 @@ export function run(raw, env, nowSec) {
   }
   const stateDir = env.TDC_STATE_DIR || "/home/node/.claude/tdc/state";
   const quotaFile = path.join(stateDir, "quota.json");
-  const quota = buildQuotaSnapshot(readJsonSafe(quotaFile), input, env, nowSec);
+  let quota = buildQuotaSnapshot(readJsonSafe(quotaFile), input, env, nowSec);
   const session = buildSessionSnapshot(input, env, nowSec);
   const key = sessionKey(input, env);
   const previous = key ? readJsonSafe(path.join(stateDir, 'sessions', `${key}.json`)) : null;
@@ -264,7 +260,7 @@ export function run(raw, env, nowSec) {
   session.title ||= getSessionTitle(session, { projectsDir: path.join(env.CLAUDE_CONFIG_DIR || '/home/node/.claude', 'projects') });
 
   try {
-    writeJsonAtomic(quotaFile, quota);
+    quota = withQuotaLock(quotaFile, (previous) => buildQuotaSnapshot(previous, input, env, nowSec));
   } catch {
     /* 状态目录不可写时只影响桌面端展示，不影响 Claude Code */
   }
