@@ -141,7 +141,7 @@ export const DEFAULT_SETTINGS: Settings = {
     autoPrompt: true,
     allowApiFallback: false,
     includeStopped: false,
-    limitPatterns: ["(?i)usage limit reached", "(?i)you've (hit|reached) your .*limit", "(?i)(5-hour|weekly) limit", "(?i)limit will reset"],
+    limitPatterns: [String.raw`(?i)\busage limit (reached|exceeded)\b`, String.raw`(?i)\byou['’]ve (hit|reached) your [^\r\n]*\blimit\b`, String.raw`(?i)\b(5[- ]hour|weekly) (usage )?limit (reached|exceeded|hit)\b`],
   },
   docker: { host: "", defaultImage: "tdc/claude-dev:latest" },
   sidebarShortcut: "ctrl+shift+b",

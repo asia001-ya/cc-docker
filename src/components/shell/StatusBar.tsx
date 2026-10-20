@@ -40,8 +40,12 @@ function QuotaSeg({ label, win, now, warn, critical }: { label: string; win: Quo
       <span style={{ color }} className="font-semibold">
         {Math.round(r.pct)}%
       </span>
-      <span style={{ color }} className="tracking-[-1px] opacity-90">
-        {blockBar(r.pct)}
+      <span aria-hidden="true" className="inline-flex h-[6px] shrink-0 items-stretch gap-px opacity-90" style={{ color }}>
+        {Array.from(blockBar(r.pct), (cell, index) => (
+          <span key={index} className="h-full w-[5px] shrink-0" style={cell === "■"
+            ? { backgroundColor: "currentColor" }
+            : { backgroundImage: "repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 3px)", opacity: 0.4 }} />
+        ))}
       </span>
       {win?.resets_at && !r.inferred && <span className="text-outline">{formatReset(win.resets_at, now)}重置</span>}
       {r.inferred && <span className="text-outline">*</span>}

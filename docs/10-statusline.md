@@ -24,7 +24,7 @@
 | >50%–70%（含 70%） | 紫色 `#A78BFA` |
 | >70% | 红色 `#F85149` |
 
-方括号为灰色，空余部分使用暗色反斜杠斜纹。填充使用居中的 `■`，避免下部块字符 `▅` 向下偏移，相较早期 `▇` 保持约三分之一的高度缩减；终端字符的离散高度无法精确到任意像素。只改变填充字符，不增加行距或使用整格背景色。
+方括号为灰色，空余部分使用暗色短反斜纹 `∖`（U+2216），填充使用居中的 `■`（U+25A0）。桌面端内置仅包含这两个字符的 `TDC Statusline` 小字体，两者共享宽度、上下边界和基线，保持短条高度并避免填充与斜纹错位。普通反斜杠和其他终端文字继续使用所选字体；字体加载完成后再附着会话，避免 WebGL 缓存回退字形。字体由 `scripts/build-statusline-font.py` 从几何轮廓生成。
 
 刻度宽度在上一版按可用列数计算的长度上减半，取最近整数，至少保留一格；宽窗最多 16 格，窄窗同步缩短。百分比文字和方括号字号保持不变。
 
@@ -38,7 +38,7 @@
 node scripts/update-statusline.mjs claude-01 claude-02
 ```
 
-更新器仅处理显式指定且带 `tdc.managed=true` 标签的运行容器；遇到自定义 statusLine 命令会停止。旧文件保存在容器 `/opt/tdc/.statusline-backups/`，脚本原子替换，managed settings 设置五秒刷新间隔。无活跃 Claude 的容器会在下一次启动 Claude 时显示新状态栏。
+更新器仅处理显式指定且带 `tdc.managed=true` 标签的运行容器；遇到自定义 statusLine 命令会停止。旧文件保存在容器 `/opt/tdc/.statusline-backups/`，脚本原子替换，managed settings 设置五秒刷新间隔。无活跃 Claude 的容器会在下一次启动 Claude 时显示新状态栏。短斜纹的精确对齐还需使用包含该字体的新版桌面程序。
 
 针对状态栏运行 `npm run test:statusline` 和 `node --test docker/tests/run-tests.mjs`。开发地址 `/tests/statusline.html` 提供共用实际渲染函数的 xterm 示例，可切换四档占用、未知值、200K 容量及终端列宽。桌面程序使用 `npm run tauri -- build --no-bundle` 构建。
 

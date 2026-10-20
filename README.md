@@ -43,7 +43,7 @@ docs/                       操作指南、功能说明、排障记录与项目�
 
 ## 快速开始
 
-Windows x64 用户可直接从 [1.0 Release](https://github.com/asia001-ya/cc-docker/releases/tag/v1.0) 下载安装包或独立运行文件。运行前安装并启动 Docker Desktop（WSL2 / Linux 容器模式）；首次启动按引导构建容器镜像。更新内容见 [1.0 发布说明](docs/releases/1.0.md)。
+Windows x64 用户可直接从 [V1.0.1 Release](https://github.com/asia001-ya/cc-docker/releases/tag/v1.0.1) 下载安装包或独立运行文件。运行前安装并启动 Docker Desktop（WSL2 / Linux 容器模式）；首次启动按引导构建容器镜像。更新内容见 [V1.0.1 发布说明](docs/releases/1.0.1.md)。
 
 从源码运行：
 

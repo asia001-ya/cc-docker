@@ -1,0 +1,9 @@
+/* Only meter glyphs use this face; all text uses the selected terminal font. */
+@font-face {
+  font-family: "TDC Statusline";
+  src: url("./tdc-statusline.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  unicode-range: U+2216, U+25A0;
+}

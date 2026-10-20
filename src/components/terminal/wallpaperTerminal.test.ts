@@ -10,6 +10,8 @@ vi.mock("@xterm/xterm", () => ({
     options: ITerminalOptions;
     unicode = { activeVersion: "" };
     written: string[] = [];
+    rows = 24;
+    refresh = vi.fn();
     dispose = vi.fn();
     constructor(options: ITerminalOptions) { this.options = options; }
     loadAddon() {}
@@ -20,7 +22,7 @@ vi.mock("@xterm/xterm", () => ({
   },
 }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() {} } }));
-vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss() {} dispose() {} } }));
+vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss() {} clearTextureAtlas() {} dispose() {} } }));
 vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
 vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
 vi.mock("@xterm/addon-search", () => ({ SearchAddon: class {} }));

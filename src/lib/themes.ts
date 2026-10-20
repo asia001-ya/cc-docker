@@ -167,7 +167,7 @@ export const FONTS = ["JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas"
  * @returns CSS font-family
  */
 export function fontStack(primary: string): string {
-  return `"${primary}", "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace`;
+  return `"TDC Statusline", "${primary}", "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace`;
 }
 
 /**

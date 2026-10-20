@@ -37,15 +37,30 @@
     <p class="intro">优先单行展示，空间不足时自动换行。当前文件夹以橙色标识。</p>
     <div class="toolbar">
       <div class="states" aria-label="上下文状态">
+        <button id="low" aria-pressed="false">绿色 · 6%</button>
+        <button id="empty" aria-pressed="false">绿色 · 0%</button>
         <button id="standard" aria-pressed="true">绿色 · 20%</button>
         <button id="warning" aria-pressed="false">橙色 · 40%</button>
         <button id="elevated" aria-pressed="false">紫色 · 60%</button>
         <button id="full" aria-pressed="false">红色 · 92%</button>
+        <button id="complete" aria-pressed="false">红色 · 100%</button>
         <button id="unknown" aria-pressed="false">暂无数据</button>
         <button id="small" aria-pressed="false">200K · 思考关闭</button>
       </div>
       <label class="width-control">终端宽度
         <select id="width"><option value="0">自适应</option><option value="80">80 列</option><option value="48">48 列</option></select>
+      </label>
+      <label class="width-control">字体
+        <select id="font"><option>Consolas</option><option>JetBrains Mono</option><option>Fira Code</option><option>Cascadia Code</option></select>
+      </label>
+      <label class="width-control">渲染器
+        <select id="renderer"><option value="webgl">WebGL</option><option value="dom">DOM</option></select>
+      </label>
+      <label class="width-control">字号
+        <select id="size"><option value="16">16px</option><option value="14">14px</option><option value="20">20px</option></select>
+      </label>
+      <label class="width-control">行高
+        <select id="line-height"><option value="1.2">1.2</option><option value="1.5">1.5</option></select>
       </label>
     </div>
     <section class="preview" aria-label="终端效果预览">

@@ -17,7 +17,7 @@ function temporary(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdc-s
 test('状态栏保留六项实时信息、隐藏会话名，空间足够时只占一行', () => {
   const output = plain(renderStatusLine({}, snapshot(), 160));
   for (const item of ['Opus 5.5', 'high', '1M', 'git feature/status', 'project', 'ctx [', '15%']) assert.ok(output.includes(item), item);
-  assert.match(output, /ctx \[■+\\+\] 15%/);
+  assert.match(output, /ctx \[■+∖+\] 15%/);
   assert.doesNotMatch(output, /思考 |目录 |会话 |实现状态栏/, '直接展示级别与文件夹名，不展示会话名');
   assert.doesNotMatch(output, /\/workspace\//, '目录只显示最后一层名称');
   assert.equal(output.split('\n').length, 1);
@@ -30,7 +30,7 @@ test('思考和模型变化使用当次值，200K 不显示为 1M，未知占用
   const output = plain(renderStatusLine({}, disabled));
   assert.match(output, /关闭/); assert.doesNotMatch(output, /思考 /); assert.match(output, /200K/); assert.match(output, /ctx \[■+\] 100%/);
   const unknown = plain(renderStatusLine({}, buildSessionSnapshot({}, {}, 12)));
-  assert.match(unknown, /ctx \[\\+\] —/); assert.doesNotMatch(unknown, /0%/);
+  assert.match(unknown, /ctx \[∖+\] —/); assert.doesNotMatch(unknown, /0%/);
 });
 
 test('窄窗和中文路径按显示列截断，不拆开 emoji 或输出控制字符', () => {

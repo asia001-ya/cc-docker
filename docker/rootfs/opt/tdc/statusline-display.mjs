@@ -90,8 +90,9 @@ function contextMeter(session, width, occupied) {
   const length = Math.max(1, Math.round(preferredLength / 2));
   const filled = percent === null ? 0 : Math.round(percent / 100 * length);
   const color = percent === null ? colors.muted : percent <= 20 ? colors.healthy : percent <= 50 ? colors.warning : percent <= 70 ? colors.elevated : colors.critical;
-  // A centered square avoids the bottom anchoring of Unicode fractional block fills.
-  const bar = paint('■'.repeat(filled), color) + paint('\\'.repeat(length - filled), colors.track);
+  // These two glyphs share height and baseline in the terminal's TDC Statusline font.
+  // Keep ASCII backslashes untouched so ordinary terminal output retains its font.
+  const bar = paint('■'.repeat(filled), color) + paint('∖'.repeat(length - filled), colors.track);
   return paint('ctx [', colors.muted) + bar + paint('] ', colors.muted) + paint(number, color, percent !== null);
 }
 

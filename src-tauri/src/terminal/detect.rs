@@ -54,6 +54,37 @@ mod tests {
     }
 
     #[test]
+    fn 提前预警和额度说明不会被识别为耗尽() {
+        let mut d = LimitDetector::new(&QuotaSettings::default().limit_patterns);
+        for text in [
+            "\x1b[33mApproaching your weekly limit · 80% used\x1b[0m\r\n",
+            "Warning: 90% of your 5-hour limit used\r\n",
+            "Your weekly limit still applies\r\n",
+            "Your limit will reset at 3pm\r\n",
+            "weekly li",
+            "mit · 80% used\r\n",
+            "You've reached your ",
+            "daily goal\r\nWeekly limit: 80% used\r\n",
+        ] {
+            assert!(d.scan(text).is_none(), "预警不应触发耗尽：{text:?}");
+        }
+    }
+
+    #[test]
+    fn 明确达到上限的提示仍能触发耗尽() {
+        for text in [
+            "Usage limit reached · resets 3pm",
+            "You've hit your limit · resets 3pm",
+            "You’ve reached your weekly usage limit",
+            "Weekly limit exceeded · resets tomorrow",
+            "5-hour usage limit reached · resets 3pm",
+        ] {
+            let mut d = LimitDetector::new(&QuotaSettings::default().limit_patterns);
+            assert!(d.scan(text).is_some(), "应识别明确的耗尽提示：{text}");
+        }
+    }
+
+    #[test]
     fn 非法正则被忽略() {
         let mut d = LimitDetector::new(&["(".to_string()]);
         assert!(d.scan("usage limit reached").is_none());

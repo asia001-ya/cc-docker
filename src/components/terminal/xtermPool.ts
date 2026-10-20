@@ -18,6 +18,7 @@ import { choosePaste, oscWritesClipboard, PASTE_IMAGE_TYPES } from "../../lib/cl
 import { useUiStore } from "../../store/uiStore";
 import { createTerminalResizeScheduler, createTerminalSizeSync } from "../../lib/terminalResize";
 import { terminalThemeWithWallpaper } from "./wallpaperTheme";
+import { statuslineFontReady } from "../../lib/statuslineFont";
 
 /** 池中条目 */
 export interface PooledTerm {
@@ -236,6 +237,11 @@ export function acquire(sessionId: string, settings: TerminalSettings, meta: { t
     term.onData((d) => term.write(d === "\r" ? "\r\n$ " : d === "\x7f" ? "\b \b" : d));
   }
   pool.set(sessionId, p);
+  void statuslineFontReady.then(() => {
+    if (pool.get(sessionId) !== p) return;
+    p.webgl?.clearTextureAtlas();
+    p.term.refresh(0, p.term.rows - 1);
+  });
   return p;
 }
 
@@ -248,6 +254,8 @@ export function acquire(sessionId: string, settings: TerminalSettings, meta: { t
 export async function attach(sessionId: string, onExit: (code: number | null) => void): Promise<void> {
   const p = pool.get(sessionId);
   if (!p || p.attached || !isTauri()) return;
+  await statuslineFontReady;
+  if (pool.get(sessionId) !== p || p.attached) return;
   // 新终端先按挂载位置适配，避免以 xterm 默认 80x24 回放其他尺寸的输出。
   fitNow(sessionId);
   p.attached = true;

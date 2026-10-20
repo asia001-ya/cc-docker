@@ -92,11 +92,25 @@ impl Default for QuotaSettings {
             allow_api_fallback: false,
             include_stopped: false,
             limit_patterns: vec![
-                r"(?i)usage limit reached".into(),
-                r"(?i)you've (hit|reached) your .*limit".into(),
-                r"(?i)(5-hour|weekly) limit".into(),
-                r"(?i)limit will reset".into(),
+                r"(?i)\busage limit (reached|exceeded)\b".into(),
+                r"(?i)\byou['’]ve (hit|reached) your [^\r\n]*\blimit\b".into(),
+                r"(?i)\b(5[- ]hour|weekly) (usage )?limit (reached|exceeded|hit)\b".into(),
             ],
+        }
+    }
+}
+
+impl QuotaSettings {
+    /// 更新旧版默认识别规则；用户自定义规则保持原样。
+    fn normalize_loaded(&mut self) {
+        let legacy = [
+            r"(?i)usage limit reached",
+            r"(?i)you've (hit|reached) your .*limit",
+            r"(?i)(5-hour|weekly) limit",
+            r"(?i)limit will reset",
+        ];
+        if self.limit_patterns.iter().map(String::as_str).eq(legacy) {
+            self.limit_patterns = Self::default().limit_patterns;
         }
     }
 }
@@ -191,6 +205,7 @@ impl ConfigStore {
     pub fn load_with_wallpaper_dir(dir: PathBuf, wallpaper_dir: PathBuf) -> Self {
         let _ = fs::create_dir_all(&dir);
         let mut settings = read_settings(&dir.join("settings.json"));
+        settings.quota.normalize_loaded();
         settings.wallpaper.normalize_loaded();
         settings.default_pricing.normalize();
         if settings.default_pricing.validate().is_err() {
@@ -332,6 +347,36 @@ mod tests {
         assert_eq!(s.terminal.font_family, "JetBrains Mono");
         assert_eq!(s.sidebar_shortcut, "ctrl+shift+b");
         assert_eq!(s.quota.switch_threshold, 100.0);
+    }
+
+    #[test]
+    fn 加载旧版默认限额规则时迁移并保留其它设置() {
+        let dir = tmp_dir("legacy-limit-patterns");
+        let mut settings = Settings::default();
+        settings.terminal.font_size = 22;
+        settings.quota.warn_threshold = 40.0;
+        settings.quota.limit_patterns = vec![
+            r"(?i)usage limit reached".into(),
+            r"(?i)you've (hit|reached) your .*limit".into(),
+            r"(?i)(5-hour|weekly) limit".into(),
+            r"(?i)limit will reset".into(),
+        ];
+        write_json_atomic(&dir.join("settings.json"), &settings).unwrap();
+        let loaded = ConfigStore::load(dir).settings();
+        assert_eq!(loaded.quota.limit_patterns, QuotaSettings::default().limit_patterns);
+        assert_eq!(loaded.quota.warn_threshold, 40.0);
+        assert_eq!(loaded.terminal.font_size, 22);
+    }
+
+    #[test]
+    fn 加载时保留自定义或禁用的限额规则() {
+        for patterns in [vec![r"(?i)custom limit exceeded".into()], Vec::new()] {
+            let dir = tmp_dir("custom-limit-patterns");
+            let mut settings = Settings::default();
+            settings.quota.limit_patterns = patterns.clone();
+            write_json_atomic(&dir.join("settings.json"), &settings).unwrap();
+            assert_eq!(ConfigStore::load(dir).settings().quota.limit_patterns, patterns);
+        }
     }
 
     #[test]
