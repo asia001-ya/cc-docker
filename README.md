@@ -43,7 +43,7 @@ docs/                       操作指南、功能说明、排障记录与项目�
 
 ## 快速开始
 
-Windows x64 用户可直接从 [V1.0.2 Release](https://github.com/asia001-ya/cc-docker/releases/tag/v1.0.2) 下载安装包或独立运行文件。运行前安装并启动 Docker Desktop（WSL2 / Linux 容器模式）；首次启动按引导构建容器镜像。更新内容见 [V1.0.2 发布说明](docs/releases/1.0.2.md)。
+Windows x64 用户可直接从 [V1.0.3 Release](https://github.com/asia001-ya/cc-docker/releases/tag/v1.0.3) 下载安装包或独立运行文件。运行前安装并启动 Docker Desktop（WSL2 / Linux 容器模式）；首次启动按引导构建容器镜像。更新内容见 [V1.0.3 发布说明](docs/releases/1.0.3.md)。
 
 从源码运行：
 
@@ -62,6 +62,10 @@ npm run dev   # http://localhost:5420
 生成的计划、实现类 Markdown 文件可点击终端右上角的文档图标展开「输出内容」独立阅读，支持搜索、复制和保留阅读位置。分屏时图标位于窗格标题下方。见 [输出内容阅读面板](docs/09-output-reader.md)。
 
 容器右键菜单中的「Git 凭据」可按域名复用宿主机 HTTPS 登录，并选择同步提交姓名和邮箱。见 [使用宿主机 Git 凭据](docs/11-git-sharing.md)。
+
+桌面端可从 GitHub Releases 自动检查、下载并安装新版，安装版和独立运行版均支持。见 [应用更新与发布流程](docs/12-app-updates.md)。
+
+顶部“释放内存”可分析整机内存和进程占用，选择普通应用整理工作集，并按需回收 WSL 缓存。见 [内存管理](docs/04-operations-guide.md#整机内存分析与清理)。
 
 ## 测试
 

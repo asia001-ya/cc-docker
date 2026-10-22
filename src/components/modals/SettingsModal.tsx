@@ -15,12 +15,13 @@ import { applySettings, termOptions } from "../terminal/xtermPool";
 import { Modal } from "../ui/Modal";
 import { ProxyNodesPane } from "./ProxyNodesPane";
 import { WallpaperPane } from "./WallpaperPane";
+import { UpdatesPane } from "./UpdatesPane";
 import { PricingEditor } from "./PricingEditor";
 import { mergeBuiltinModelPricing, modelPriceDrafts, parseModelPrices, parsePriceDraft, priceDraft, ZERO_PRICING, type ModelPriceDraft } from "../../lib/providerPricing";
 import { discardWallpaper } from "../../lib/wallpaper";
 import { Button, Callout, Field, Icon, Input, Kbd, Section, Select, Switch } from "../ui/controls";
 
-type TabId = "appearance" | "wallpaper" | "docker" | "quota" | "providers" | "pricing" | "proxy" | "shortcuts";
+type TabId = "appearance" | "wallpaper" | "docker" | "quota" | "providers" | "pricing" | "proxy" | "shortcuts" | "updates";
 
 /** 自带增删改、不走底部"保存"的分页 */
 const SELF_MANAGED_TABS: TabId[] = ["providers", "proxy"];
@@ -34,6 +35,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "pricing", label: "默认定价", icon: "payments" },
   { id: "proxy", label: "代理节点", icon: "vpn_lock" },
   { id: "shortcuts", label: "快捷键", icon: "keyboard" },
+  { id: "updates", label: "应用更新", icon: "system_update" },
 ];
 
 /**
@@ -399,6 +401,8 @@ export function SettingsModal({ tab: initialTab }: { tab?: TabId }) {
         </nav>
 
         <div className="flex min-w-0 flex-col gap-4">
+          {tab === "updates" && <UpdatesPane value={draft.updates} disabled={saving}
+            onChange={(updates) => setDraft((previous) => ({ ...previous, updates }))} />}
           {tab === "wallpaper" && <WallpaperPane value={draft.wallpaper} onChange={setWallpaper} disabled={saving}
             onImported={(asset) => importedAssets.current.add(asset.fileName)}
             onBusyChange={(busy) => { importPending.current = busy; setImporting(busy); }} />}

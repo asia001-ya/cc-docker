@@ -1,7 +1,7 @@
 {
   "name": "tht-docker-claude",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Claude 多容器终端管理器（终端至上的 Windows 桌面端）",
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "build": "node scripts/check-bundle-privacy.mjs && tsc --noEmit && vite build && node scripts/check-bundle-privacy.mjs --dist",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "release:package": "node scripts/package-release.mjs",
     "test": "vitest run",
     "test:privacy": "node --test scripts/check-bundle-privacy.test.mjs",
     "test:outputs": "node --test tests/output-reader.test.mjs",

@@ -145,6 +145,8 @@ pub struct Settings {
     pub quota: QuotaSettings,
     /// Docker 连接
     pub docker: DockerSettings,
+    /// 应用更新：检查和下载在后台完成，退出后安装。
+    pub updates: crate::updates::UpdateSettings,
     /// 授权账号用量的参考定价（不代表订阅账单）。
     pub default_pricing: crate::providers::DefaultPricing,
     /// 侧栏快捷键（ctrl+shift+b / ctrl+b）

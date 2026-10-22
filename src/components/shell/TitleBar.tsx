@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "../../api/commands";
 import { useTabStore, type Tab } from "../../store/tabStore";
 import { useUiStore } from "../../store/uiStore";
+import { useUpdateStore } from "../../store/updateStore";
 import { useEntry } from "../../store/fleetStore";
 import { leaves } from "../../lib/splitTree";
 import { Icon, IconButton, StatusDot } from "../ui/controls";
@@ -111,6 +112,7 @@ export function TitleBar({ onNewSession, onSplit, onCloseTab }: Props) {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const openModal = useUiStore((s) => s.openModal);
   const shortcut = useUiStore((s) => (s.settings.sidebarShortcut === "ctrl+b" ? "Ctrl+B" : "Ctrl+Shift+B"));
+  const update = useUpdateStore((s) => s.status);
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const container = activeTab ? sessions[activeTab.activeSessionId]?.container : undefined;
   const entry = useEntry(container);
@@ -144,6 +146,15 @@ export function TitleBar({ onNewSession, onSplit, onCloseTab }: Props) {
       </nav>
 
       <div className="flex shrink-0 items-center gap-0.5 pr-1">
+        {(update?.phase === "available" || update?.phase === "downloading" || update?.phase === "ready") && (
+          <button type="button" aria-label={update.phase === "ready" ? "更新已就绪，打开应用更新" : "有新版本，打开应用更新"}
+            title={update.phase === "ready" ? `v${update.release?.version} 已下载，可更新并重启` : `发现新版本 v${update.release?.version}`}
+            onClick={() => openModal({ kind: "settings", tab: "updates" })}
+            className="mx-1 inline-flex h-6 items-center gap-1 rounded bg-accent/10 px-1.5 font-ui text-label-sm text-accent hover:bg-accent/20">
+            <Icon name={update.phase === "downloading" ? "progress_activity" : "system_update"} size={14} />
+            {update.phase === "ready" ? "更新就绪" : update.phase === "downloading" ? "更新下载中" : "有新版本"}
+          </button>
+        )}
         <MemoryReclaimButton />
         <IconButton icon="add_box" title="新建容器（Ctrl+Shift+N）" onClick={() => openModal({ kind: "createContainer" })} />
         <IconButton icon="settings" title="设置（Ctrl+,）" onClick={() => openModal({ kind: "settings" })} />

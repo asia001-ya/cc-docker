@@ -10,5 +10,6 @@ pub mod output_cmds;
 pub mod proxy_cmds;
 pub mod settings_cmds;
 pub mod term_cmds;
+pub mod update_cmds;
 pub mod usage_cmds;
 pub mod wallpaper_cmds;

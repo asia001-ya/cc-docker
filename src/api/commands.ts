@@ -24,6 +24,9 @@ import type {
   ImageStatus,
   MemoryReclaimResult,
   MemoryReclaimStatus,
+  MemoryAnalysis,
+  MemoryCleanupRequest,
+  MemoryCleanupResult,
   OpenRequest,
   OutputSnapshot,
   Precheck,
@@ -45,6 +48,7 @@ import type {
   ScrollbackState,
   UsageQuery,
   UsageResult,
+  UpdateStatus,
 } from "./types";
 
 /**
@@ -64,6 +68,8 @@ export const engineInfo = () => invoke<EngineInfo>("engine_info");
 export const memoryReclaimStatus = () => invoke<MemoryReclaimStatus>("memory_reclaim_status");
 export const memoryReclaim = () => invoke<MemoryReclaimResult>("memory_reclaim");
 export const memoryCompact = () => invoke<MemoryReclaimResult>("memory_compact");
+export const memoryAnalyze = () => invoke<MemoryAnalysis>("memory_analyze");
+export const memoryCleanup = (request: MemoryCleanupRequest) => invoke<MemoryCleanupResult>("memory_cleanup", { request });
 export const fleetGet = () => invoke<FleetState>("fleet_get");
 export const fleetRefresh = () => invoke<void>("fleet_refresh");
 export const containerQuotaRefresh = (name: string) => invoke<FleetEntry>("container_quota_refresh", { name });
@@ -136,6 +142,10 @@ export const debugInjectQuota = (container: string, quota: QuotaSnapshot | null)
 // ---- 设置与供应商 ----
 export const settingsGet = () => invoke<Settings>("settings_get");
 export const settingsSet = (settings: Settings) => invoke<void>("settings_set", { settings });
+export const updateStatus = () => invoke<UpdateStatus>("update_status");
+export const updateCheck = () => invoke<UpdateStatus>("update_check");
+export const updateDownload = () => invoke<UpdateStatus>("update_download");
+export const updateInstall = () => invoke<void>("update_install");
 export const dockerTest = (host: string) => invoke<EngineInfo>("docker_test", { host });
 export const providerList = () => invoke<ProviderView[]>("provider_list");
 export const providerSave = (profile: ProviderProfile, token: string | null) =>
@@ -182,6 +192,9 @@ export const onImageBuildDone = (cb: (p: { ok: boolean; error: string | null }) 
   listen<{ ok: boolean; error: string | null }>("image://build-done", (e) => cb(e.payload));
 
 // ---- 事件 ----
+export const onUpdateState = (cb: (status: UpdateStatus) => void): Promise<UnlistenFn> =>
+  listen<UpdateStatus>("update://state", (e) => cb(e.payload));
+
 /**
  * 订阅容器汇总更新。
  * @param cb 回调

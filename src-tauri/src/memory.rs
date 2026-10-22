@@ -1,8 +1,9 @@
-//! Manual cache reclaim and optional compaction for the running Docker WSL2 VM.
+//! Host memory analysis, selected application trimming and Docker WSL2 cache controls.
 //!
-//! This never shuts down WSL, restarts containers, pressures anonymous memory, or
-//! changes WSL configuration. Linux cache reduction is an estimate, not a claim
-//! about memory returned to Windows: page reporting is asynchronous and optional.
+//! WSL controls never shut down the VM, restart containers or change configuration.
+//! Selected Windows applications retain their private allocations when trimmed.
+//! Linux cache reduction is an estimate, not a claim about memory returned to
+//! Windows: page reporting is asynchronous and optional.
 
 use std::process::{Output, Stdio};
 use std::sync::Mutex;
@@ -13,6 +14,9 @@ use tokio::process::Command;
 
 use crate::docker::client::DockerClient;
 use crate::error::{AppError, AppResult};
+
+pub mod windows;
+pub use windows::{ProcessMemoryEntry, ProcessTarget, ProcessTrimResult, SystemMemorySnapshot};
 
 const COOLDOWN: Duration = Duration::from_secs(30);
 const RECLAIM_SCRIPT: &str = include_str!("memory/reclaim.sh");
@@ -38,6 +42,36 @@ pub struct MemoryReclaimResult {
     pub host_after_bytes: Option<u64>,
     pub operation: MemoryOperation,
     /// Time from operation completion to the final Windows memory observation.
+    pub observation_seconds: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryAnalysis {
+    pub system: Option<SystemMemorySnapshot>,
+    pub processes: Vec<ProcessMemoryEntry>,
+    pub supported: bool,
+    pub reason: Option<String>,
+    pub wsl: MemoryReclaimStatus,
+    pub running: bool,
+    pub cooldown_remaining_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryCleanupRequest {
+    pub targets: Vec<ProcessTarget>,
+    pub include_wsl_cache: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryCleanupResult {
+    pub system_before: Option<SystemMemorySnapshot>,
+    pub system_after: Option<SystemMemorySnapshot>,
+    pub processes: Vec<ProcessTrimResult>,
+    pub wsl: Option<MemoryReclaimResult>,
+    pub errors: Vec<String>,
     pub observation_seconds: u64,
 }
 
@@ -83,6 +117,12 @@ struct ReclaimLease<'a>(&'a ReclaimGate);
 static RECLAIM_GATE: ReclaimGate = ReclaimGate(Mutex::new(GateState { running: false, finished: None }));
 
 impl ReclaimGate {
+    fn state(&self) -> (bool, u64) {
+        let gate = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        let remaining = gate.finished.and_then(|time| COOLDOWN.checked_sub(time.elapsed()));
+        (gate.running, remaining.map_or(0, |time| time.as_millis() as u64))
+    }
+
     fn acquire(&self) -> AppResult<ReclaimLease<'_>> {
         let mut gate = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if gate.running {
@@ -176,7 +216,9 @@ fn docker_distribution_running(bytes: &[u8]) -> bool {
 
 async fn ensure_supported(docker: &DockerClient) -> AppResult<()> {
     validate_host(docker.connection_key(), cfg!(windows))?;
-    let info = docker.system_info().await?;
+    let info = tokio::time::timeout(Duration::from_secs(8), docker.system_info())
+        .await
+        .map_err(|_| AppError::Other("Docker 能力检查超时，请稍后重试".into()))??;
     validate_engine(
         info.os_type.as_deref().unwrap_or_default(),
         info.operating_system.as_deref().unwrap_or_default(),
@@ -199,6 +241,37 @@ pub async fn status(docker: &DockerClient) -> MemoryReclaimStatus {
         Ok(()) => MemoryReclaimStatus { supported: true, reason: None },
         Err(error) => MemoryReclaimStatus { supported: false, reason: Some(error.to_string()) },
     }
+}
+
+/// Windows statistics never require a Docker connection. WSL probing is bounded
+/// independently so a disconnected engine cannot block analysis indefinitely.
+pub async fn analyze(docker: Option<&DockerClient>) -> AppResult<MemoryAnalysis> {
+    let windows_task = tokio::task::spawn_blocking(|| (windows::system_snapshot(), windows::list_processes()));
+    let wsl_probe = async {
+        let Some(docker) = docker else {
+            return MemoryReclaimStatus { supported: false, reason: Some("尚未连接 Docker 引擎".into()) };
+        };
+        tokio::time::timeout(Duration::from_secs(12), status(docker)).await.unwrap_or_else(|_| MemoryReclaimStatus {
+            supported: false,
+            reason: Some("WSL 能力检查超时，可继续分析和整理 Windows 应用".into()),
+        })
+    };
+    let (samples, wsl) = tokio::join!(windows_task, wsl_probe);
+    let (system, processes) = samples.map_err(|_| AppError::Other("Windows 内存分析未完成，请重试".into()))?;
+    let mut reasons = Vec::new();
+    let system = system.map_err(|error| reasons.push(error.to_string())).ok();
+    let processes = processes.map_err(|error| reasons.push(error.to_string())).unwrap_or_default();
+    reasons.dedup();
+    let (running, cooldown_remaining_ms) = RECLAIM_GATE.state();
+    Ok(MemoryAnalysis {
+        system,
+        processes,
+        supported: cfg!(windows),
+        reason: (!reasons.is_empty()).then(|| reasons.join("；")),
+        wsl,
+        running,
+        cooldown_remaining_ms,
+    })
 }
 
 fn cache_bytes(meminfo: &str) -> AppResult<u64> {
@@ -306,6 +379,22 @@ async fn perform(docker: &DockerClient, operation: MemoryOperation) -> AppResult
     // Both actions retain this same lease through the observation window, then
     // share a cooldown. Neither action can overlap the other.
     let _lease = RECLAIM_GATE.acquire()?;
+    let pending = execute_wsl(docker, operation).await?;
+    let observation_started = Instant::now();
+    tokio::time::sleep(operation.observation_delay()).await;
+    Ok(finish_wsl(pending, observation_started.elapsed().as_secs()).await)
+}
+
+struct PendingWsl {
+    operation: MemoryOperation,
+    cache_before_bytes: u64,
+    cache_after_bytes: Option<u64>,
+    host_before: Option<HostMemorySample>,
+}
+
+/// The caller owns the shared lease. Combined cleanup uses this path without
+/// recursively acquiring a gate or waiting through a second observation window.
+async fn execute_wsl(docker: &DockerClient, operation: MemoryOperation) -> AppResult<PendingWsl> {
     ensure_supported(docker).await?;
     let host_before = host_working_set().await;
     // Re-check directly before exec: wsl --distribution would otherwise start a
@@ -340,21 +429,95 @@ async fn perform(docker: &DockerClient, operation: MemoryOperation) -> AppResult
     // The completion marker is stronger evidence than the exit code: the final
     // optional statistics command may fail after a successful cache write.
     let (cache_before_bytes, cache_after_bytes) = parse_reclaim_output(&output.stdout)?;
-    // Give asynchronous page reporting a chance; this is an observation, not a
-    // guarantee that all clean cache pages have already been returned to Windows.
-    let observation_started = Instant::now();
-    tokio::time::sleep(operation.observation_delay()).await;
+    Ok(PendingWsl { operation, cache_before_bytes, cache_after_bytes, host_before })
+}
+
+async fn finish_wsl(pending: PendingWsl, observation_seconds: u64) -> MemoryReclaimResult {
     let host_after = host_working_set().await;
-    let observation_seconds = observation_started.elapsed().as_secs();
-    let (host_before_bytes, host_after_bytes) = comparable_host_samples(host_before.as_ref(), host_after.as_ref());
-    Ok(MemoryReclaimResult {
-        cache_before_bytes,
-        cache_after_bytes,
+    let (host_before_bytes, host_after_bytes) =
+        comparable_host_samples(pending.host_before.as_ref(), host_after.as_ref());
+    MemoryReclaimResult {
+        cache_before_bytes: pending.cache_before_bytes,
+        cache_after_bytes: pending.cache_after_bytes,
         host_before_bytes,
         host_after_bytes,
-        operation,
+        operation: pending.operation,
         observation_seconds,
+    }
+}
+
+fn validate_cleanup(request: &MemoryCleanupRequest) -> AppResult<()> {
+    if request.targets.is_empty() && !request.include_wsl_cache {
+        return Err(AppError::Invalid("请先选择要整理的应用或 WSL 缓存".into()));
+    }
+    if request.targets.len() > 256 {
+        return Err(AppError::Invalid("选择的进程过多，请刷新分析结果".into()));
+    }
+    let mut pids = std::collections::HashSet::new();
+    for target in &request.targets {
+        if target.pid == 0
+            || !pids.insert(target.pid)
+            || !target.created_at.parse::<u64>().is_ok_and(|time| time > 0 && time.to_string() == target.created_at)
+        {
+            return Err(AppError::Invalid("进程身份无效或重复，请刷新分析结果".into()));
+        }
+    }
+    Ok(())
+}
+
+pub async fn cleanup(docker: Option<&DockerClient>, request: MemoryCleanupRequest) -> AppResult<MemoryCleanupResult> {
+    validate_cleanup(&request)?;
+    let _lease = RECLAIM_GATE.acquire()?;
+    if !cfg!(windows) {
+        return Err(AppError::Other("整机内存清理仅支持 Windows 桌面应用".into()));
+    }
+    let include_wsl_cache = request.include_wsl_cache;
+    let (before, batch) = tokio::task::spawn_blocking(move || {
+        let before = windows::system_snapshot();
+        let batch = if request.targets.is_empty() { None } else { Some(windows::begin_trim(&request.targets)) };
+        (before, batch)
     })
+    .await
+    .map_err(|_| AppError::Other("Windows 内存整理执行中断，结果未确认".into()))?;
+    let mut errors = Vec::new();
+    let system_before = before.map_err(|error| errors.push(error.to_string())).ok();
+    let batch = batch.and_then(|result| result.map_err(|error| errors.push(error.to_string())).ok());
+    let pending_wsl = if include_wsl_cache {
+        match docker {
+            Some(docker) => {
+                execute_wsl(docker, MemoryOperation::Cache).await.map_err(|error| errors.push(error.to_string())).ok()
+            }
+            None => {
+                errors.push("未回收 WSL 缓存：尚未连接 Docker 引擎".into());
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let observation_started = Instant::now();
+    tokio::time::sleep(Duration::from_secs(if include_wsl_cache { 15 } else { 5 })).await;
+    let observation_seconds = observation_started.elapsed().as_secs();
+    let final_windows = tokio::task::spawn_blocking(move || {
+        let after = windows::system_snapshot();
+        let processes = batch.map(windows::finish_trim).unwrap_or_default();
+        (after, processes)
+    });
+    let final_wsl = async {
+        match pending_wsl {
+            Some(pending) => Some(finish_wsl(pending, observation_seconds).await),
+            None => None,
+        }
+    };
+    let (final_windows, wsl) = tokio::join!(final_windows, final_wsl);
+    let (system_after, processes) = match final_windows {
+        Ok((after, processes)) => (after.map_err(|error| errors.push(error.to_string())).ok(), processes),
+        Err(_) => {
+            errors.push("清理后的 Windows 采样未完成，无法确认变化".into());
+            (None, Vec::new())
+        }
+    };
+    Ok(MemoryCleanupResult { system_before, system_after, processes, wsl, errors, observation_seconds })
 }
 
 #[cfg(test)]
@@ -362,6 +525,36 @@ mod tests {
     use super::*;
 
     const MEMINFO: &str = "MemTotal: 1234 kB\nBuffers: 100 kB\nCached: 400 kB\nSReclaimable: 60 kB\nShmem: 20 kB\n";
+
+    #[test]
+    fn cleanup_rejects_empty_duplicate_and_invalid_process_identities() {
+        let request = |targets, include_wsl_cache| MemoryCleanupRequest { targets, include_wsl_cache };
+        let target = || ProcessTarget { pid: 123, created_at: "134000000000000001".into() };
+        assert!(validate_cleanup(&request(Vec::new(), false)).is_err());
+        assert!(validate_cleanup(&request(Vec::new(), true)).is_ok());
+        assert!(validate_cleanup(&request(vec![target()], false)).is_ok());
+        assert!(validate_cleanup(&request(vec![target(), target()], false)).is_err());
+        for created_at in ["", "0", "-1", "01", "1.1", "18446744073709551616"] {
+            assert!(validate_cleanup(&request(vec![ProcessTarget { pid: 123, created_at: created_at.into() }], false))
+                .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn windows_analysis_does_not_require_a_docker_connection() {
+        let analysis = analyze(None).await.unwrap();
+        assert!(!analysis.wsl.supported);
+        assert!(analysis.wsl.reason.unwrap().contains("尚未连接"));
+        assert_eq!(analysis.supported, cfg!(windows));
+        #[cfg(windows)]
+        {
+            let system = analysis.system.unwrap();
+            assert!(system.total_bytes > 0);
+            assert!(system.available_bytes <= system.total_bytes);
+            assert!(!analysis.processes.is_empty());
+            assert!(!analysis.processes.iter().find(|row| row.pid == std::process::id()).unwrap().eligible);
+        }
+    }
 
     #[test]
     fn memory_target_requires_windows_known_local_pipe_and_wsl2() {
@@ -482,6 +675,11 @@ mod tests {
         // Acquisition precedes any Docker/WSL I/O, so this test never touches a VM.
         let docker = DockerClient::connect("").unwrap();
         let lease = RECLAIM_GATE.acquire().unwrap();
+        let request = || MemoryCleanupRequest {
+            targets: vec![ProcessTarget { pid: 123, created_at: "134000000000000001".into() }],
+            include_wsl_cache: false,
+        };
+        assert!(cleanup(None, request()).await.unwrap_err().to_string().contains("等待本次操作完成"));
         for operation in [MemoryOperation::Cache, MemoryOperation::Compact] {
             let result = match operation {
                 MemoryOperation::Cache => reclaim(&docker).await,
@@ -492,6 +690,7 @@ mod tests {
         drop(lease);
         assert!(reclaim(&docker).await.unwrap_err().to_string().contains("秒后再试"));
         assert!(compact(&docker).await.unwrap_err().to_string().contains("秒后再试"));
+        assert!(cleanup(None, request()).await.unwrap_err().to_string().contains("秒后再试"));
     }
 
     #[test]

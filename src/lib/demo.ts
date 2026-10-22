@@ -144,6 +144,7 @@ export const DEFAULT_SETTINGS: Settings = {
     limitPatterns: [String.raw`(?i)\busage limit (reached|exceeded)\b`, String.raw`(?i)\byou['’]ve (hit|reached) your [^\r\n]*\blimit\b`, String.raw`(?i)\b(5[- ]hour|weekly) (usage )?limit (reached|exceeded|hit)\b`],
   },
   docker: { host: "", defaultImage: "tdc/claude-dev:latest" },
+  updates: { autoCheck: true, autoDownload: true, installOnExit: true },
   sidebarShortcut: "ctrl+shift+b",
 };
 

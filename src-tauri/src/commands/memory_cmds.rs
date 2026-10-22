@@ -3,8 +3,25 @@
 use tauri::State;
 
 use crate::error::AppResult;
-use crate::memory::{self, MemoryReclaimResult, MemoryReclaimStatus};
+use crate::memory::{
+    self, MemoryAnalysis, MemoryCleanupRequest, MemoryCleanupResult, MemoryReclaimResult, MemoryReclaimStatus,
+};
 use crate::state::AppState;
+
+#[tauri::command]
+pub async fn memory_analyze(state: State<'_, AppState>) -> AppResult<MemoryAnalysis> {
+    let docker = state.docker().ok();
+    memory::analyze(docker.as_ref()).await
+}
+
+#[tauri::command]
+pub async fn memory_cleanup(
+    state: State<'_, AppState>,
+    request: MemoryCleanupRequest,
+) -> AppResult<MemoryCleanupResult> {
+    let docker = state.docker().ok();
+    memory::cleanup(docker.as_ref(), request).await
+}
 
 #[tauri::command]
 pub async fn memory_reclaim_status(state: State<'_, AppState>) -> AppResult<MemoryReclaimStatus> {

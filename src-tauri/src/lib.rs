@@ -12,6 +12,7 @@ pub mod proxy;
 pub mod quota;
 pub mod state;
 pub mod terminal;
+pub mod updates;
 pub mod usage;
 
 use std::sync::Arc;
@@ -54,6 +55,15 @@ pub fn run() {
             let dir = app.path().app_config_dir().expect("无法定位应用配置目录");
             let wallpaper_dir = app.path().app_data_dir().expect("无法定位应用数据目录").join("wallpapers");
             let config = Arc::new(ConfigStore::load_with_wallpaper_dir(dir.clone(), wallpaper_dir));
+            let update_cache = app.path().app_cache_dir()?.join("updates");
+            updates::install::cleanup_cache(&update_cache);
+            let updates = Arc::new(updates::UpdateManager::load(
+                update_cache,
+                std::env::current_exe()?,
+                app.package_info().version.to_string(),
+            ));
+            tauri::async_runtime::spawn(updates::run_loop(app.handle().clone(), updates.clone(), config.clone()));
+            app.manage(updates);
             let providers = Arc::new(ProviderStore::load(&dir)?);
             let usage = Arc::new(crate::usage::store::UsageStore::load(&dir));
             let proxies = Arc::new(ProxyStore::load(&dir));
@@ -155,6 +165,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::container_cmds::engine_info,
+            commands::memory_cmds::memory_analyze,
+            commands::memory_cmds::memory_cleanup,
             commands::memory_cmds::memory_reclaim_status,
             commands::memory_cmds::memory_reclaim,
             commands::memory_cmds::memory_compact,
@@ -201,6 +213,10 @@ pub fn run() {
             commands::term_cmds::debug_inject_quota,
             commands::settings_cmds::settings_get,
             commands::settings_cmds::settings_set,
+            commands::update_cmds::update_status,
+            commands::update_cmds::update_check,
+            commands::update_cmds::update_download,
+            commands::update_cmds::update_install,
             commands::wallpaper_cmds::wallpaper_import,
             commands::wallpaper_cmds::wallpaper_resolve,
             commands::wallpaper_cmds::wallpaper_delete,
@@ -225,6 +241,14 @@ pub fn run() {
             commands::proxy_cmds::proxy_refresh,
             commands::proxy_cmds::proxy_capability_apply,
         ])
-        .run(tauri::generate_context!())
-        .expect("启动 Tauri 应用失败");
+        .build(tauri::generate_context!())
+        .expect("启动 Tauri 应用失败")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { code, .. } = event {
+                // 更新并重启已经启动助手；正常关闭窗口时才自动安排退出后安装。
+                if code.is_none() && app.state::<AppState>().config.settings().updates.install_on_exit {
+                    app.state::<Arc<updates::UpdateManager>>().install_on_exit(app);
+                }
+            }
+        });
 }

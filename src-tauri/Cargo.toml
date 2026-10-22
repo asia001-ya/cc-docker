@@ -1,6 +1,6 @@
 [package]
 name = "tht-docker-claude"
-version = "1.0.2"
+version = "1.0.3"
 description = "Claude 多容器终端管理器"
 edition = "2021"
 rust-version = "1.80"
@@ -31,6 +31,20 @@ tar = "0.4"                          # upload_to_container 需要 tar 流
 url = "2"                            # 解析 vless 分享链接与订阅地址
 percent-encoding = "2"               # 还原 socks5 链接中的用户名与密码（url 的底层依赖，不引入新 crate）
 keyring = { version = "3", features = ["windows-native"] } # API Token 存 Windows 凭据管理器
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "system-proxy"] }
+semver = "1"
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_SystemInformation",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Security",
+    "Win32_System_RemoteDesktop",
+] }
 
 [profile.release]
 codegen-units = 1

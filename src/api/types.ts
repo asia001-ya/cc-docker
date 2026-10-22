@@ -24,6 +24,67 @@ export interface MemoryReclaimResult {
   hostAfterBytes: number | null;
 }
 
+/** Windows 整机物理内存与提交量，均为同一次采样。 */
+export interface SystemMemorySnapshot {
+  totalBytes: number;
+  availableBytes: number;
+  usedBytes: number;
+  commitBytes: number;
+  commitLimitBytes: number;
+  sampledAtMs: number;
+}
+
+/** 创建时间保留为字符串，避免 FILETIME 超过 JavaScript 安全整数范围。 */
+export interface ProcessMemoryEntry {
+  pid: number;
+  createdAt: string | null;
+  name: string;
+  workingSetBytes: number | null;
+  privateBytes: number | null;
+  eligible: boolean;
+  reason: string | null;
+}
+
+export interface MemoryAnalysis {
+  system: SystemMemorySnapshot | null;
+  processes: ProcessMemoryEntry[];
+  supported: boolean;
+  reason: string | null;
+  wsl: MemoryReclaimStatus;
+  running: boolean;
+  cooldownRemainingMs: number;
+}
+
+export interface ProcessTarget {
+  pid: number;
+  createdAt: string;
+}
+
+export interface ProcessTrimResult {
+  pid: number;
+  createdAt: string;
+  name: string;
+  status: "trimmed" | "skipped";
+  beforeBytes: number | null;
+  afterBytes: number | null;
+  reason: string | null;
+}
+
+export interface MemoryCleanupRequest {
+  targets: ProcessTarget[];
+  includeWslCache: boolean;
+}
+
+/** 这些观测互相重叠，不能相加作为释放量。 */
+export interface MemoryCleanupResult {
+  systemBefore: SystemMemorySnapshot | null;
+  systemAfter: SystemMemorySnapshot | null;
+  processes: ProcessTrimResult[];
+  wsl: MemoryReclaimResult | null;
+  errors: string[];
+  observationSeconds: number;
+}
+
 /** 容器挂载 */
 export interface MountInfo {
   kind: string;
@@ -410,6 +471,32 @@ export interface DockerSettings {
   defaultImage: string;
 }
 
+/** 应用更新偏好。 */
+export interface UpdateSettings {
+  autoCheck: boolean;
+  autoDownload: boolean;
+  installOnExit: boolean;
+}
+
+export interface UpdateRelease {
+  version: string;
+  notes: string;
+  publishedAt: string | null;
+  url: string;
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  phase: "idle" | "checking" | "available" | "downloading" | "ready" | "installing" | "error";
+  release: UpdateRelease | null;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  /** Unix 秒。 */
+  checkedAt: number | null;
+  error: string | null;
+  installKind: "installer" | "portable" | "development" | "unsupported";
+}
+
 /** 全局设置 */
 export interface WallpaperAsset {
   fileName: string;
@@ -433,6 +520,7 @@ export interface Settings {
   terminal: TerminalSettings;
   quota: QuotaSettings;
   docker: DockerSettings;
+  updates: UpdateSettings;
   defaultPricing: DefaultPricing;
   sidebarShortcut: string;
 }

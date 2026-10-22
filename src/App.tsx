@@ -28,6 +28,7 @@ import {
 import { useFleetStore } from "./store/fleetStore";
 import { useTabStore, type Tab } from "./store/tabStore";
 import { useUiStore } from "./store/uiStore";
+import { connectUpdates } from "./store/updateStore";
 import { DEMO_FLEET, DEMO_SESSIONS } from "./lib/demo";
 import { buildShortcuts, isPlainPaste, matchShortcut, type Action } from "./lib/shortcuts";
 import { isPreview, leaves } from "./lib/splitTree";
@@ -52,6 +53,7 @@ import { QuotaSwitchModal } from "./components/modals/QuotaSwitchModal";
 import { SharedVolumeModal } from "./components/modals/SharedVolumeModal";
 import { DangerZoneModal } from "./components/modals/DangerZoneModal";
 import { SettingsModal } from "./components/modals/SettingsModal";
+import { MemoryManagerModal } from "./components/modals/MemoryManagerModal";
 import { ProxyModal, PROXY_STATE_META } from "./components/modals/ProxyModal";
 import { ImageBuildPanel } from "./components/shell/ImageBuildPanel";
 import { WallpaperLayer, wallpaperCssVars } from "./components/shell/WallpaperLayer";
@@ -485,6 +487,8 @@ export default function App() {
 
   // ---------- 启动：设置、汇总、恢复会话、事件 ----------
 
+  useEffect(connectUpdates, []);
+
   useEffect(() => {
     if (!isTauri()) {
       useFleetStore.getState().setDemo(import.meta.env.DEV);
@@ -575,6 +579,8 @@ export default function App() {
   const renderModal = () => {
     if (!modal) return null;
     switch (modal.kind) {
+      case "memory":
+        return <MemoryManagerModal />;
       case "createContainer":
         return <CreateContainerModal />;
       case "auth":
