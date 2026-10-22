@@ -10,6 +10,7 @@ import { themeById } from "../../lib/themes";
 import { Icon } from "../ui/controls";
 import { bindTerminalHistoryScroll } from "../../lib/terminalScroll";
 import { TmuxScrollbar } from "./TmuxScrollbar";
+import { OutputReader } from "./OutputReader";
 
 interface Props {
   sessionId: string;
@@ -69,6 +70,7 @@ export function TerminalView({ sessionId, focused, visible, inSplit, onCloseSess
     if (visible && focused) {
       fitSession(sessionId);
       const frame = requestAnimationFrame(() => {
+        if (ref.current?.parentElement?.querySelector(".output-reading-panel")) return;
         get(sessionId)?.term.focus();
       });
       return () => cancelAnimationFrame(frame);
@@ -77,7 +79,7 @@ export function TerminalView({ sessionId, focused, visible, inSplit, onCloseSess
 
   return (
     <div
-      className={`terminal-surface relative flex h-full w-full flex-col ${inSplit && focused ? "ring-1 ring-inset ring-accent/40" : ""}`}
+      className={`terminal-surface relative isolate flex h-full w-full flex-col ${inSplit && focused ? "ring-1 ring-inset ring-accent/40" : ""}`}
       style={{ background: themeById(settings.theme).theme.background }}
       // xterm 的本地强制选择会停止 mousedown 冒泡，捕获阶段先标记当前窗格。
       onMouseDownCapture={() => focus(sessionId)}
@@ -105,6 +107,7 @@ export function TerminalView({ sessionId, focused, visible, inSplit, onCloseSess
       <div className="relative min-h-0 flex-1">
         <div id={`terminal-${sessionId}`} ref={ref} className="h-full overflow-hidden pl-1.5 pt-1" />
         {visible && !exited && rec?.tmux && isTauri() && <TmuxScrollbar sessionId={sessionId} theme={settings.theme} containerRef={ref} />}
+        {visible && focused && rec && isTauri() && <OutputReader key={rec.id} session={rec} />}
       </div>
       {exited && (
         <div className="pointer-events-none absolute bottom-3 right-4 rounded-md bg-surface-container-high/90 px-2.5 py-1 font-ui text-label-sm text-on-surface-variant shadow-flyout">

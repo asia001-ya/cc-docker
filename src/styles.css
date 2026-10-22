@@ -2,11 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 侧栏和额度总览根据自身宽度排版，进度条始终占用剩余空间。 */
+.quota-details { container-type: inline-size; }
+@container (max-width: 280px) {
+  .quota-window-row { grid-template-columns: 38px minmax(0, 1fr) 46px; row-gap: 2px; }
+  .quota-window-reset { grid-column: 2 / -1; text-align: right; }
+  .quota-window-reset:empty { display: none; }
+  .quota-details-footer { flex-wrap: wrap; column-gap: 12px; row-gap: 2px; }
+  .quota-details-footer > :last-child { margin-left: auto; }
+}
+
 /* Read-only answer directory and reading drawer. Neither participates in terminal layout. */
-.output-reader-layer { position: absolute; inset: 0; z-index: 24; pointer-events: none; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+.output-reader-layer { position: absolute; inset: 0; z-index: 24; overflow: hidden; container-type: inline-size; pointer-events: none; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
 .output-card, .output-reading-panel { pointer-events: auto; color: #e6edf3; border: 1px solid #ffffff18; background: #202329f5; box-shadow: 0 12px 40px #0005, 0 2px 8px #0004; backdrop-filter: blur(20px); }
-.output-card { position: absolute; top: 14px; right: 18px; width: min(310px, calc(100% - 36px)); border-radius: 15px; padding: 9px 11px; }
-.output-card.is-collapsed { width: auto; padding: 5px 9px; }
+.output-card { position: absolute; top: 14px; right: 18px; width: min(310px, calc(100% - 36px)); max-height: calc(100% - 28px); overflow: auto; border-radius: 15px; padding: 9px 11px; }
+.output-card.is-collapsed { width: 32px; height: 32px; padding: 0; border-radius: 8px; }
+.output-card.is-collapsed .output-card-heading { height: 100%; }
+.output-card.is-collapsed .output-card-toggle { width: 100%; height: 100%; min-height: 0; padding: 0; justify-content: center; }
 .output-card-heading { display: flex; align-items: center; gap: 6px; }
 .output-card-toggle { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1; min-height: 32px; padding: 0 4px; font-size: 13px; font-weight: 600; text-align: left; }
 .output-card-toggle > .material-symbols-outlined:first-child, .output-panel-heading > .material-symbols-outlined { color: #83d6ff; }
@@ -59,6 +71,14 @@
 .output-reader-layer button:focus-visible, .output-selector input:focus, .output-selector select:focus, .output-reading-body:focus-visible { outline: 1px solid #60cdff; outline-offset: -1px; }
 @keyframes output-enter { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) { .output-reading-panel { animation: none; } }
+@container (max-width: 360px) {
+  .output-selector { grid-template-columns: minmax(0, 1fr); padding: 10px 12px 4px; gap: 6px; }
+  .output-panel-heading { padding: 8px 10px; gap: 6px; }
+  .output-panel-heading strong { font-size: 12px; }
+  .output-reading-body { padding: 16px 14px 24px; }
+  .output-latest { padding: 8px 14px; }
+  .output-panel-footer { flex-wrap: wrap; padding: 8px 14px; gap: 4px; }
+}
 
 /* 全局基础：Windows 11 暗色、禁止整页滚动与橡皮筋效果 */
 html,

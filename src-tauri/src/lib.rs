@@ -5,6 +5,7 @@ pub mod config;
 pub mod docker;
 pub mod error;
 pub mod git_bridge;
+pub mod memory;
 pub mod ports;
 pub mod providers;
 pub mod proxy;
@@ -154,6 +155,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::container_cmds::engine_info,
+            commands::memory_cmds::memory_reclaim_status,
+            commands::memory_cmds::memory_reclaim,
+            commands::memory_cmds::memory_compact,
             commands::container_cmds::fleet_get,
             commands::container_cmds::fleet_refresh,
             commands::container_cmds::container_quota_refresh,
@@ -161,6 +165,7 @@ pub fn run() {
             commands::container_edit_cmds::container_edit_precheck,
             commands::container_edit_cmds::container_edit_apply,
             commands::container_cmds::container_list,
+            commands::container_cmds::container_working_dir,
             commands::container_cmds::container_directories,
             commands::container_cmds::container_defaults,
             commands::container_cmds::container_precheck,

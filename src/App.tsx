@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { OpenRequest, SessionRecord } from "./api/types";
 import {
+  containerWorkingDir,
   errorText,
   fleetGet,
   fleetRefresh,
@@ -37,7 +38,6 @@ import { SidebarDrawer } from "./components/shell/SidebarDrawer";
 import { QuotaFlyout } from "./components/shell/QuotaFlyout";
 import { SearchBar, Toasts } from "./components/shell/Toasts";
 import { SplitView } from "./components/terminal/SplitView";
-import { ActiveOutputReader } from "./components/terminal/OutputReader";
 import { applySettings, dispose, get, pasteClipboard, setKeyHandler, setLinkHandler, sizeOf } from "./components/terminal/xtermPool";
 import { handleTerminalLink } from "./components/terminal/previewActions";
 import { CreateContainerModal } from "./components/modals/CreateContainerModal";
@@ -320,9 +320,10 @@ export default function App() {
   const quickOpen = useCallback(
     (container: string) => {
       const entry = useFleetStore.getState().fleet.entries.find((e) => e.container.name === container);
-      const cwd = entry?.container.mounts.find((m) => m.kind === "bind" && m.destination.startsWith("/workspace"))?.destination ?? "/workspace";
+      const demoDir = entry?.container.mounts.find((m) => m.kind === "bind" && m.destination.startsWith("/workspace"))?.destination ?? "/workspace";
       const n = Object.values(useTabStore.getState().sessions).filter((s) => s.container === container).length + 1;
-      openSession({ container, title: `会话 #${n}`, cwd, mode: "claude", args: [], env: [], tmux: true })
+      (isTauri() ? containerWorkingDir(container) : Promise.resolve(demoDir))
+        .then((cwd) => openSession({ container, title: `会话 #${n}`, cwd, mode: "claude", args: [], env: [], tmux: true }))
         .then(() => {
           if (!useUiStore.getState().sidebarPinned) useUiStore.getState().setSidebar(false);
         })
@@ -581,7 +582,9 @@ export default function App() {
           <AuthModal
             container={modal.container}
             onRunInTerminal={(container, title, mode, args) =>
-              void openSession({ container, title, cwd: "/workspace", mode, args, env: [], tmux: true }).catch((e) => useUiStore.getState().toast("error", errorText(e)))
+              void (isTauri() ? containerWorkingDir(container) : Promise.resolve("/workspace"))
+                .then((cwd) => openSession({ container, title, cwd, mode, args, env: [], tmux: true }))
+                .catch((e) => useUiStore.getState().toast("error", errorText(e)))
             }
           />
         );
@@ -630,7 +633,6 @@ export default function App() {
             ))
           )}
           <SearchBar />
-          <ActiveOutputReader />
         </main>
       </div>
       {!sidebarPinned && <SidebarDrawer onOpenIn={quickOpen} onSmartSwitch={() => smartSwitch(null)} />}

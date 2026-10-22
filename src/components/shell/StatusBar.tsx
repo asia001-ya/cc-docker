@@ -103,7 +103,7 @@ export function StatusBar() {
             </span>
             <span className="hidden min-w-0 items-center gap-3 overflow-hidden lg:flex">
             {entry.health === "api" ? (
-              <span className="text-accent">API 按量 · {entry.provider?.model ?? "默认模型"}</span>
+              <span className="text-accent">API 按量</span>
             ) : entry.health === "stopped" ? (
               <span className="text-outline">容器已停止</span>
             ) : (
@@ -162,7 +162,6 @@ export function StatusBar() {
             +{ports.length - (firstUrl ? 1 : 0)} 端口
           </button>
         )}
-        {sessionSnap?.model?.display_name && <span className="hidden xl:inline">{sessionSnap.model.display_name}</span>}
         {typeof sessionSnap?.context_used_percentage === "number" && <span className="hidden sm:inline">ctx {Math.round(sessionSnap.context_used_percentage)}%</span>}
         <span className="hidden lg:inline">UTF-8</span>
         <span className="hidden items-center gap-1 sm:flex">

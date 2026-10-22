@@ -22,6 +22,8 @@ import type {
   ContainerHostConfig,
   HostConfigApplyResult,
   ImageStatus,
+  MemoryReclaimResult,
+  MemoryReclaimStatus,
   OpenRequest,
   OutputSnapshot,
   Precheck,
@@ -59,6 +61,9 @@ export const wallpaperResolve = (fileName: string) => invoke<string>("wallpaper_
 export const wallpaperDelete = (fileName: string) => invoke<void>("wallpaper_delete", { fileName });
 
 export const engineInfo = () => invoke<EngineInfo>("engine_info");
+export const memoryReclaimStatus = () => invoke<MemoryReclaimStatus>("memory_reclaim_status");
+export const memoryReclaim = () => invoke<MemoryReclaimResult>("memory_reclaim");
+export const memoryCompact = () => invoke<MemoryReclaimResult>("memory_compact");
 export const fleetGet = () => invoke<FleetState>("fleet_get");
 export const fleetRefresh = () => invoke<void>("fleet_refresh");
 export const containerQuotaRefresh = (name: string) => invoke<FleetEntry>("container_quota_refresh", { name });
@@ -68,6 +73,7 @@ export const containerEditApply = (name: string, config: ContainerEdit, expected
   invoke<HostConfigApplyResult>("container_edit_apply", { name, config, expectedContainerId });
 export const containerDirectories = (name: string, path: string) => invoke<ContainerDirectories>("container_directories", { name, path });
 export const containerList = (includeUnmanaged: boolean) => invoke<ContainerInfo[]>("container_list", { includeUnmanaged });
+export const containerWorkingDir = (name: string) => invoke<string>("container_working_dir", { name });
 export const containerDefaults = () => invoke<CreateDefaults>("container_defaults");
 export const containerPrecheck = (req: CreateContainerRequest) => invoke<Precheck>("container_precheck", { req });
 export const containerCreate = (req: CreateContainerRequest, start: boolean) =>

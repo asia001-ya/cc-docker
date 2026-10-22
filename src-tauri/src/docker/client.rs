@@ -112,6 +112,14 @@ pub struct DockerClient {
 impl DockerClient {
     pub fn connection_key(&self) -> &str { &self.host }
 
+    /// Read the engine's platform before a host-level WSL operation.
+    pub(crate) async fn system_info(&self) -> AppResult<bollard::models::SystemInfo> {
+        tokio::time::timeout(Duration::from_secs(5), self.inner.info())
+            .await
+            .map_err(|_| AppError::DockerUnavailable("Docker 引擎检查超时，请稍后重试".into()))?
+            .map_err(AppError::from)
+    }
+
     /// Long-lived non-TTY bridge. Credential payloads travel only in its stdin/stdout.
     pub async fn git_bridge_exec(&self, id: &str, script: &str) -> AppResult<StartExecResults> {
         let exec = self.inner.create_exec(id, CreateExecOptions {

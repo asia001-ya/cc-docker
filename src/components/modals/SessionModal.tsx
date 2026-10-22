@@ -3,9 +3,9 @@
  * 新建：显示名、目标容器、初始目录（挂载点下拉）、启动命令（claude / 恢复历史 / bash / 自定义）、环境变量、tmux 持久化。
  * 重命名：只改显示名。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionMode } from "../../api/types";
-import { errorText, termRename } from "../../api/commands";
+import { containerWorkingDir, errorText, isTauri, termRename } from "../../api/commands";
 import { useFleetStore } from "../../store/fleetStore";
 import { useTabStore } from "../../store/tabStore";
 import { useUiStore } from "../../store/uiStore";
@@ -53,13 +53,22 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
 
   const [target, setTarget] = useState(container ?? running[0]?.container.name ?? "");
   const entry = entries.find((e) => e.container.name === target);
+  const [directory, setDirectory] = useState<{ target: string; path: string | null; error: string | null } | null>(null);
+  const defaultDir = isTauri()
+    ? directory?.target === target ? directory.path : null
+    : entry?.container.mounts.find((m) => m.kind === "bind" && m.destination.startsWith("/workspace"))?.destination ?? "/workspace";
+  const directoryError = directory?.target === target ? directory.error : null;
+  const loadingDirectory = !!target && !defaultDir && !directoryError;
   const mountDirs = useMemo(() => {
     const dirs = (entry?.container.mounts ?? []).filter((m) => m.kind === "bind" && m.destination.startsWith("/workspace")).map((m) => m.destination);
-    return dirs.length ? dirs : ["/workspace"];
-  }, [entry]);
+    return [...new Set([...(defaultDir ? [defaultDir] : []), ...dirs])];
+  }, [entry, defaultDir]);
   const [title, setTitle] = useState(existing?.title ?? `会话 #${sessionCount + 1}`);
   const [titleEdited, setTitleEdited] = useState(false);
-  const [cwd, setCwd] = useState(mountDirs[0]);
+  // An explicit path (typed, picked or restored from history) outranks a late
+  // default-directory response. Tag the default with its target to avoid races.
+  const [cwdOverride, setCwd] = useState<string | null>(null);
+  const cwd = cwdOverride ?? defaultDir ?? "";
   const [cwdEdited, setCwdEdited] = useState(false);
   const [choosingDirectory, setChoosingDirectory] = useState(false);
   const [launch, setLaunch] = useState<SessionLaunch>("claude");
@@ -75,22 +84,33 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
   const history = useMemo(() => buildSessionHistory(entry?.sessions ?? []), [entry?.sessions]);
   const selectedHistory = history.find((item) => item.sessionId === resumeId);
 
+  useEffect(() => {
+    if (mode !== "new" || !target || !isTauri()) return;
+    let cancelled = false;
+    setDirectory(null);
+    void containerWorkingDir(target).then(
+      (path) => { if (!cancelled) setDirectory({ target, path, error: null }); },
+      (error: unknown) => { if (!cancelled) setDirectory({ target, path: null, error: `读取默认目录失败：${errorText(error)}。请手动选择目录。` }); },
+    );
+    return () => { cancelled = true; };
+  }, [mode, target, entry?.container.id]);
+
   const selectHistory = (id: string) => {
     setResumeId(id);
-    const next = deriveHistorySelection(history.find((item) => item.sessionId === id), { title, cwd, titleEdited, cwdEdited });
+    const selected = history.find((item) => item.sessionId === id);
+    const next = deriveHistorySelection(selected, { title, cwd, titleEdited, cwdEdited });
     setTitle(next.title);
-    setCwd(next.cwd);
+    if (selected?.cwd && !cwdEdited) setCwd(next.cwd);
   };
 
   const selectTarget = (name: string) => {
     setTarget(name);
     setResumeId("");
     setManualResume(false);
+    setCwd(null);
+    setCwdEdited(false);
+    setChoosingDirectory(false);
     if (!titleEdited) setTitle(`会话 #${sessionCount + 1}`);
-    if (!cwdEdited) {
-      const next = entries.find((item) => item.container.name === name);
-      setCwd(next?.container.mounts.find((mount) => mount.kind === "bind" && mount.destination.startsWith("/workspace"))?.destination ?? "/workspace");
-    }
   };
 
   /**
@@ -110,6 +130,7 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
       return;
     }
     if (!target) return toast("warning", "请选择运行中的容器");
+    if (!cwd.startsWith("/")) return toast("warning", loadingDirectory ? "正在读取默认工作目录，请稍候或手动选择目录" : "请输入容器内的绝对目录路径");
     if (env.errors.length) return toast("warning", env.errors[0]);
     const extra = claudeArgs.trim() ? claudeArgs.trim().split(/\s+/) : [];
     const spec: NewSessionSpec = {
@@ -170,7 +191,7 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
       footer={
         <>
           <Button onClick={close}>取消</Button>
-          <Button variant="primary" icon="terminal" kbd="Ctrl+Enter" disabled={busy || !target} onClick={() => void submit()}>
+          <Button variant="primary" icon="terminal" kbd="Ctrl+Enter" disabled={busy || !target || !cwd.startsWith("/")} onClick={() => void submit()}>
             {busy ? "正在打开…" : "打开会话"}
           </Button>
         </>
@@ -182,7 +203,7 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
             <Input value={title} onChange={(e) => { setTitle(e.target.value); setTitleEdited(true); }} data-autofocus />
           </Field>
           <Field label="目标容器" required error={running.length === 0 ? "没有运行中的容器" : null}>
-            <Select value={target} onChange={(e) => selectTarget(e.target.value)}>
+            <Select aria-label="目标容器" value={target} onChange={(e) => selectTarget(e.target.value)}>
               {running.map((e) => (
                 <option key={e.container.name} value={e.container.name}>
                   {e.container.name}
@@ -192,20 +213,20 @@ export function SessionModal({ mode, container, sessionId, split, onCreate }: Pr
             </Select>
           </Field>
         </div>
-        <Field label="初始工作目录" hint="选择自定义可浏览容器目录；也可手动输入容器内路径">
+        <Field label="初始工作目录" hint={loadingDirectory ? "正在读取目标容器的默认工作目录…" : "默认使用目标容器的工作目录；也可手动输入或浏览容器内路径"} error={cwdOverride === null ? directoryError : null}>
           <div className="flex gap-1.5">
-            <Select className="!w-56" value={mountDirs.includes(cwd) ? cwd : ""} onChange={(e) => {
+            <Select aria-label="工作目录选项" className="!w-56" value={mountDirs.includes(cwd) ? cwd : ""} onChange={(e) => {
               if (e.target.value) { setCwd(e.target.value); setCwdEdited(true); }
               else setChoosingDirectory(true);
             }}>
               {mountDirs.map((d) => (
                 <option key={d} value={d}>
-                  {d}
+                  {d}{d === defaultDir ? "（默认目录）" : ""}
                 </option>
               ))}
               <option value="">自定义…</option>
             </Select>
-            <Input mono className="min-w-0 flex-1" value={cwd} onChange={(e) => { setCwd(e.target.value); setCwdEdited(true); }} />
+            <Input mono aria-label="初始工作目录" placeholder={loadingDirectory ? "正在读取…" : "容器内绝对路径"} className="min-w-0 flex-1" value={cwd} onChange={(e) => { setCwd(e.target.value); setCwdEdited(true); }} />
             <Button className="shrink-0 whitespace-nowrap" icon="folder_open" title="浏览容器目录" disabled={!target || busy} onClick={() => setChoosingDirectory(true)}>浏览</Button>
           </div>
         </Field>

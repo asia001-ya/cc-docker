@@ -2,9 +2,8 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { OutputItem, OutputSnapshot, SessionRecord } from "../../api/types";
-import { errorText, isTauri, termOutputs } from "../../api/commands";
+import { errorText, termOutputs } from "../../api/commands";
 import { emptyOutputs, mergeOutputs, outputLink, type OutputReaderState } from "../../lib/outputReader";
-import { useTabStore } from "../../store/tabStore";
 import { Icon, IconButton } from "../ui/controls";
 import { openExternal } from "./xtermPool";
 
@@ -34,7 +33,7 @@ export function OutputReader({ session, load = termOutputs }: OutputReaderProps)
   const saved = useRef(memory.get(session.id));
   const [data, setData] = useState<OutputReaderState>(() => saved.current?.data ?? emptyOutputs());
   const [open, setOpen] = useState(saved.current?.open ?? false);
-  const [collapsed, setCollapsed] = useState(saved.current?.collapsed ?? false);
+  const [collapsed, setCollapsed] = useState(saved.current?.collapsed ?? true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!saved.current?.data.items.length);
   const [refresh, setRefresh] = useState(0);
@@ -81,7 +80,7 @@ export function OutputReader({ session, load = termOutputs }: OutputReaderProps)
     setCopied(false);
   }, [positionKey, open]);
   useEffect(() => { if (open) closeButton.current?.focus(); }, [open]);
-  const close = () => { setOpen(false); requestAnimationFrame(() => cardButton.current?.focus()); };
+  const close = () => { setOpen(false); setCollapsed(true); requestAnimationFrame(() => cardButton.current?.focus()); };
   const choose = (next: OutputItem) => { setData(current => ({ ...current, selectedId: next.id })); setOpen(true); };
   const copy = async () => {
     if (!item) return;
@@ -93,12 +92,13 @@ export function OutputReader({ session, load = termOutputs }: OutputReaderProps)
   return <div className="output-reader-layer" onKeyDown={event => {
     event.stopPropagation();
     if (event.key === "Escape" && open) { event.preventDefault(); close(); }
+    else if (event.key === "Escape" && !collapsed) { event.preventDefault(); setCollapsed(true); cardButton.current?.focus(); }
   }}>
     {!open && <section className={`output-card ${collapsed ? "is-collapsed" : ""}`} aria-label="输出内容目录">
       <div className="output-card-heading">
-        <button ref={cardButton} type="button" className="output-card-toggle" aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}>
-          <Icon name="article" size={17} /><span>输出内容</span><span className="output-count">{data.items.length || ""}</span>
-          <Icon name={collapsed ? "expand_more" : "expand_less"} size={16} />
+        <button ref={cardButton} type="button" className="output-card-toggle" aria-label={collapsed ? "展开输出内容" : "收起输出内容"} title={collapsed ? `输出内容${data.items.length ? `（${data.items.length} 项）` : ""}` : "收起输出内容"} aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}>
+          <Icon name="article" size={17} />
+          {!collapsed && <><span>输出内容</span><span className="output-count">{data.items.length || ""}</span><Icon name="expand_less" size={16} /></>}
         </button>
         {!collapsed && <IconButton icon="refresh" title="刷新输出内容" onClick={() => setRefresh(value => value + 1)} />}
       </div>
@@ -139,13 +139,4 @@ export function OutputReader({ session, load = termOutputs }: OutputReaderProps)
       <footer className="output-panel-footer"><span>独立阅读 · 滚动位置已保留</span><span>{data.limited ? "仅展示最近可读取的输出" : `${data.items.length} 项输出`}</span></footer>
     </section>}
   </div>;
-}
-
-export function ActiveOutputReader() {
-  const session = useTabStore(state => {
-    const id = state.tabs.find(tab => tab.id === state.activeTabId)?.activeSessionId;
-    return id ? state.sessions[id] : undefined;
-  });
-  // The browser demo has no container transcript. Fixtures supply their own loader.
-  return session && isTauri() ? <OutputReader key={session.id} session={session} /> : null;
 }

@@ -8,6 +8,22 @@ export interface AppError {
   message: string;
 }
 
+/** 本机 WSL2 缓存回收能力。 */
+export interface MemoryReclaimStatus {
+  supported: boolean;
+  reason: string | null;
+}
+
+/** 前后采样是观测值，缓存净减少不等于 Windows 已收回的物理内存。 */
+export interface MemoryReclaimResult {
+  operation: "cache" | "compact";
+  observationSeconds: number;
+  cacheBeforeBytes: number;
+  cacheAfterBytes: number | null;
+  hostBeforeBytes: number | null;
+  hostAfterBytes: number | null;
+}
+
 /** 容器挂载 */
 export interface MountInfo {
   kind: string;

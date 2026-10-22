@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import type { ExhaustedPayload, Settings, TerminalSettings, WallpaperSettings } from "../api/types";
 import { DEFAULT_SETTINGS } from "../lib/demo";
+import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from "../lib/sidebarWidth";
 
 /** 业务弹框类型 */
 export type ModalKind =
@@ -31,6 +32,7 @@ export interface Toast {
 interface UiStore {
   sidebarOpen: boolean;
   sidebarPinned: boolean;
+  sidebarWidth: number;
   modal: ModalKind | null;
   quotaFlyout: boolean;
   searchOpen: boolean;
@@ -47,6 +49,7 @@ interface UiStore {
   toggleSidebar: () => void;
   setSidebar: (open: boolean) => void;
   togglePin: () => void;
+  setSidebarWidth: (width: number) => void;
   openModal: (m: ModalKind) => void;
   closeModal: () => void;
   setQuotaFlyout: (v: boolean) => void;
@@ -59,9 +62,19 @@ interface UiStore {
 
 let toastSeq = 0;
 
+function readSidebarWidth(): number {
+  try {
+    const stored = localStorage.getItem("tdc.sidebarWidth");
+    return stored === null || stored.trim() === "" ? SIDEBAR_DEFAULT_WIDTH : clampSidebarWidth(Number(stored));
+  } catch {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
 export const useUiStore = create<UiStore>((set) => ({
   sidebarOpen: false,
   sidebarPinned: false,
+  sidebarWidth: readSidebarWidth(),
   modal: null,
   quotaFlyout: false,
   searchOpen: false,
@@ -77,6 +90,11 @@ export const useUiStore = create<UiStore>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebar: (sidebarOpen) => set({ sidebarOpen }),
   togglePin: () => set((s) => ({ sidebarPinned: !s.sidebarPinned, sidebarOpen: true })),
+  setSidebarWidth: (value) => {
+    const sidebarWidth = clampSidebarWidth(value);
+    set({ sidebarWidth });
+    try { localStorage.setItem("tdc.sidebarWidth", String(sidebarWidth)); } catch { /* 存储不可用时仍可调宽。 */ }
+  },
   openModal: (modal) => set((s) => ({ modal, quotaFlyout: false, sidebarOpen: s.sidebarPinned ? s.sidebarOpen : false })),
   closeModal: () => set({ modal: null }),
   setQuotaFlyout: (quotaFlyout) => set({ quotaFlyout }),

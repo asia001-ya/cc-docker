@@ -10,6 +10,7 @@ import { useUiStore } from "../../store/uiStore";
 import { useEntry } from "../../store/fleetStore";
 import { leaves } from "../../lib/splitTree";
 import { Icon, IconButton, StatusDot } from "../ui/controls";
+import { MemoryReclaimButton } from "./MemoryReclaimButton";
 
 interface Props {
   /** 新建会话（在当前容器） */
@@ -115,7 +116,7 @@ export function TitleBar({ onNewSession, onSplit, onCloseTab }: Props) {
   const entry = useEntry(container);
 
   return (
-    <header data-tauri-drag-region className="wallpaper-panel flex h-8 shrink-0 select-none items-stretch bg-mica-alt">
+    <header data-tauri-drag-region className="wallpaper-panel relative z-30 flex h-8 shrink-0 select-none items-stretch bg-mica-alt">
       <div className="flex items-center gap-1 pl-1.5 pr-2">
         <IconButton icon={sidebarOpen ? "left_panel_close" : "left_panel_open"} title={`容器侧栏（${shortcut}）`} active={sidebarOpen} onClick={toggleSidebar} />
         <button
@@ -142,7 +143,8 @@ export function TitleBar({ onNewSession, onSplit, onCloseTab }: Props) {
         <div data-tauri-drag-region className="min-w-[24px] flex-1" />
       </nav>
 
-      <div className="flex items-center gap-0.5 pr-1">
+      <div className="flex shrink-0 items-center gap-0.5 pr-1">
+        <MemoryReclaimButton />
         <IconButton icon="add_box" title="新建容器（Ctrl+Shift+N）" onClick={() => openModal({ kind: "createContainer" })} />
         <IconButton icon="settings" title="设置（Ctrl+,）" onClick={() => openModal({ kind: "settings" })} />
       </div>

@@ -1,17 +1,19 @@
 /**
- * 可折叠侧栏（260px Acrylic 浮层，可钉住为常驻）：搜索、容器列表（状态灯 / 剩余额度 / 模式）、
+ * 可调宽侧栏（默认 380px Acrylic 浮层，可钉住为常驻）：搜索、容器列表（状态灯 / 剩余额度 / 模式）、
  * 容器右键菜单、"智能切至最高额度"、共享卷入口、新建容器。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { FleetEntry } from "../../api/types";
 import { containerAction, errorText, isTauri } from "../../api/commands";
 import { useFleetStore } from "../../store/fleetStore";
 import { useActiveSession, useTabStore } from "../../store/tabStore";
 import { useUiStore } from "../../store/uiStore";
 import { colorForRemaining, HEALTH_LABEL, remainingLabel } from "../../lib/quota";
+import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, sidebarWidthBounds } from "../../lib/sidebarWidth";
 import { Icon, IconButton, StatusDot } from "../ui/controls";
-import { QuotaWindowRow } from "./QuotaWindowRow";
+import { QuotaDetails } from "./QuotaDetails";
 import { useNow } from "./StatusBar";
+import { beginTerminalResize } from "../terminal/xtermPool";
 
 interface Props {
   /** 在容器中新开会话 */
@@ -54,7 +56,7 @@ function ContainerCard({ entry, active, onOpen, onMenu }: { entry: FleetEntry; a
         onMenu(e.clientX, e.clientY);
       }}
       title={entry.error ?? (proxyState && proxyState !== "off" ? `${HEALTH_LABEL[entry.health]} · 代理：${proxyState}` : HEALTH_LABEL[entry.health])}
-      className={`group flex cursor-pointer flex-col gap-1 rounded-lg border p-2 transition-colors ${
+      className={`group flex cursor-pointer flex-col gap-1.5 rounded-lg border p-2.5 transition-colors ${
         active ? "border-accent/40 bg-accent/[0.10]" : "border-transparent bg-white/[0.04] hover:bg-white/[0.07]"
       } ${off ? "opacity-60" : ""}`}
     >
@@ -66,7 +68,7 @@ function ContainerCard({ entry, active, onOpen, onMenu }: { entry: FleetEntry; a
           </span>
           {proxyBadge && <Icon name={proxyBadge.icon} size={14} className={proxyBadge.color} />}
         </span>
-        <span className="font-mono text-code-sm font-bold" style={{ color: off ? "#8A8886" : color }}>
+        <span className="shrink-0 whitespace-nowrap font-mono text-code-sm font-bold" style={{ color: off ? "#8A8886" : color }}>
           {remainingLabel(entry)}
           {entry.health === "warning" && " 预警"}
           {entry.health === "exhausted" && " 耗尽"}
@@ -74,14 +76,13 @@ function ContainerCard({ entry, active, onOpen, onMenu }: { entry: FleetEntry; a
       </div>
       <div className="flex items-center justify-between gap-2 font-ui text-label-sm text-on-surface-variant">
         <span className="truncate">
-          {entry.health === "api" ? `API · ${entry.provider?.model || "默认模型"}` : (entry.quota?.model?.display_name ?? entry.account?.email ?? "订阅账号")}
+          {isApi ? "API 按量" : "订阅账号"}
         </span>
         <span className="shrink-0">{off ? "已停止" : entry.health === "exhausted" && entry.blockedUntil ? "冷却中" : `${sessionCount} 会话`}</span>
       </div>
-      {!isApi && <div className="flex flex-col gap-1">
-        <QuotaWindowRow label="5小时" win={entry.quota?.five_hour} now={now} compact />
-        <QuotaWindowRow label="周" win={entry.quota?.seven_day} now={now} compact />
-      </div>}
+      {!isApi && (off
+        ? <span className="font-ui text-body-sm text-outline">容器未运行</span>
+        : <QuotaDetails quota={entry.quota} now={now} account={entry.account?.email} />)}
       {entry.error && (
         <span className="flex items-center gap-1 font-ui text-label-sm text-st-warn">
           <Icon name="warning" size={12} />
@@ -170,6 +171,8 @@ function ContainerMenu({ entry, x, y, onClose, onOpenIn }: { entry: FleetEntry; 
 export function SidebarDrawer({ onOpenIn, onSmartSwitch }: Props) {
   const open = useUiStore((s) => s.sidebarOpen);
   const pinned = useUiStore((s) => s.sidebarPinned);
+  const preferredWidth = useUiStore((s) => s.sidebarWidth);
+  const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
   const setSidebar = useUiStore((s) => s.setSidebar);
   const togglePin = useUiStore((s) => s.togglePin);
   const openModal = useUiStore((s) => s.openModal);
@@ -180,6 +183,85 @@ export function SidebarDrawer({ onOpenIn, onSmartSwitch }: Props) {
   const [filter, setFilter] = useState("");
   const [sortByQuota, setSortByQuota] = useState(false);
   const [menu, setMenu] = useState<{ entry: FleetEntry; x: number; y: number } | null>(null);
+  const aside = useRef<HTMLElement>(null);
+  const finishDrag = useRef<(() => void) | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const bounds = sidebarWidthBounds(viewportWidth, pinned);
+  const width = clampSidebarWidth(dragWidth ?? preferredWidth, bounds);
+
+  useEffect(() => {
+    const resize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  useEffect(() => () => finishDrag.current?.(), [open, pinned]);
+
+  const onResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !aside.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    finishDrag.current?.();
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startWidth = aside.current.getBoundingClientRect().width;
+    let nextWidth = startWidth;
+    let frame: number | null = null;
+    let finished = false;
+    const oldCursor = document.documentElement.style.cursor;
+    document.documentElement.style.cursor = "col-resize";
+    handle.setPointerCapture(pointerId);
+    handle.focus();
+    setDragWidth(startWidth);
+    const releaseTerminals = pinned ? beginTerminalResize(Object.keys(useTabStore.getState().sessions)) : () => {};
+    const commit = () => {
+      frame = null;
+      setDragWidth(nextWidth);
+    };
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      ev.preventDefault();
+      nextWidth = clampSidebarWidth(startWidth + ev.clientX - startX, sidebarWidthBounds(window.innerWidth, pinned));
+      if (frame === null) frame = requestAnimationFrame(commit);
+    };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", endPointer);
+      window.removeEventListener("pointercancel", endPointer);
+      window.removeEventListener("blur", finish);
+      handle.removeEventListener("lostpointercapture", endPointer);
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      document.documentElement.style.cursor = oldCursor;
+      setSidebarWidth(nextWidth);
+      setDragWidth(null);
+      releaseTerminals();
+      finishDrag.current = null;
+    };
+    const endPointer = (ev: PointerEvent) => {
+      if (ev.pointerId === pointerId) finish();
+    };
+    finishDrag.current = finish;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", endPointer);
+    window.addEventListener("pointercancel", endPointer);
+    window.addEventListener("blur", finish);
+    handle.addEventListener("lostpointercapture", endPointer);
+  };
+
+  const onResizeKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const values: Record<string, number> = {
+      ArrowLeft: width - (event.shiftKey ? 40 : 10), ArrowRight: width + (event.shiftKey ? 40 : 10),
+      Home: bounds.min, End: bounds.max, Enter: SIDEBAR_DEFAULT_WIDTH,
+    };
+    if (!(event.key in values)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSidebarWidth(clampSidebarWidth(values[event.key], bounds));
+  };
 
   const list = useMemo(() => {
     const f = entries.filter((e) => e.container.name.includes(filter.trim().toLowerCase()));
@@ -194,15 +276,35 @@ export function SidebarDrawer({ onOpenIn, onSmartSwitch }: Props) {
     <>
       {!pinned && <div className="fixed inset-0 top-8 z-30" onMouseDown={() => setSidebar(false)} />}
       <aside
+        ref={aside}
+        id="container-sidebar"
         aria-label="容器列表"
-        className={`wallpaper-panel z-40 flex min-h-0 w-[260px] shrink-0 flex-col gap-2 p-2.5 ${
+        style={{ width }}
+        className={`wallpaper-panel z-40 flex min-h-0 min-w-0 shrink-0 flex-col gap-2 p-2.5 ${
           pinned
             ? "relative border-r border-white/[0.08] bg-mica-alt"
             : "acrylic-surface fixed bottom-8 left-2 top-10 rounded-xl border border-white/[0.14] animate-[slideIn_160ms_cubic-bezier(0.1,0.9,0.2,1)]"
         }`}
       >
+        <div
+          role="separator"
+          aria-label="调整侧栏宽度"
+          aria-orientation="vertical"
+          aria-controls="container-sidebar"
+          aria-valuemin={bounds.min}
+          aria-valuemax={bounds.max}
+          aria-valuenow={width}
+          aria-valuetext={`${width} 像素`}
+          tabIndex={0}
+          title="拖动调整侧栏宽度，双击复位；方向键微调"
+          onPointerDown={onResize}
+          onKeyDown={onResizeKey}
+          onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
+          onMouseDown={(event) => event.stopPropagation()}
+          className={`absolute bottom-0 right-0 top-0 z-10 w-1.5 touch-none cursor-col-resize rounded-r-lg outline-none transition-colors hover:bg-accent/50 focus-visible:bg-accent/50 ${dragWidth !== null ? "bg-accent/50" : "bg-transparent"}`}
+        />
         <div className="flex items-center gap-1">
-          <div className="relative flex-1">
+          <div className="relative min-w-0 flex-1">
             <Icon name="search" size={15} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-outline" />
             <input
               value={filter}
@@ -222,7 +324,7 @@ export function SidebarDrawer({ onOpenIn, onSmartSwitch }: Props) {
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-0.5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-0.5">
           {!engineOk && (
             <div className="rounded-lg border border-st-bad/30 bg-st-bad-bg/60 p-2.5 font-ui text-body-sm text-on-surface">
               <div className="mb-1 flex items-center gap-1 text-st-bad">
@@ -248,7 +350,7 @@ export function SidebarDrawer({ onOpenIn, onSmartSwitch }: Props) {
               key={e.container.name}
               entry={e}
               active={e.container.name === active?.container}
-              onOpen={() => (e.container.running ? onOpenIn(e.container.name) : setMenu({ entry: e, x: 270, y: 120 }))}
+              onOpen={() => (e.container.running ? onOpenIn(e.container.name) : setMenu({ entry: e, x: (aside.current?.getBoundingClientRect().right ?? width) + 10, y: 120 }))}
               onMenu={(x, y) => setMenu({ entry: e, x, y })}
             />
           ))}

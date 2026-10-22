@@ -83,6 +83,27 @@ pub async fn container_list(state: State<'_, AppState>, include_unmanaged: bool)
     state.docker()?.list(include_unmanaged).await
 }
 
+/// Docker inspect 已包含镜像继承的目录；未设置 WorkingDir 时，Docker 默认使用根目录。
+fn working_dir_from_inspect(inspect: &bollard::models::ContainerInspectResponse) -> String {
+    inspect
+        .config
+        .as_ref()
+        .and_then(|config| config.working_dir.as_deref())
+        .filter(|path| !path.is_empty())
+        .unwrap_or("/")
+        .to_string()
+}
+
+/// 读取目标容器的默认工作目录，不依赖挂载排序或重建配置解析。
+#[tauri::command]
+pub async fn container_working_dir(state: State<'_, AppState>, name: String) -> AppResult<String> {
+    let docker = state.docker()?;
+    let inspect = tokio::time::timeout(std::time::Duration::from_secs(5), docker.inspect(&name))
+        .await
+        .map_err(|_| AppError::DockerUnavailable("读取容器默认工作目录超时，请稍后重试".into()))??;
+    Ok(working_dir_from_inspect(&inspect))
+}
+
 #[tauri::command]
 pub async fn container_directories(
     state: State<'_, AppState>,
@@ -660,7 +681,7 @@ pub(crate) fn split_bind(b: &str) -> Option<(String, &str)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{recreate_request, split_bind, usage_snapshot_path};
+    use super::{recreate_request, split_bind, usage_snapshot_path, working_dir_from_inspect};
     use crate::docker::spec::{build_create_body, CreateContainerRequest};
 
     /// 用创建体模拟 inspect 结果。参数：req——表单；返回：inspect。
@@ -676,6 +697,30 @@ mod tests {
             }),
             host_config: body.host_config,
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn container_working_dir_uses_config_even_with_workspace_mounts() {
+        let inspect = serde_json::from_value(serde_json::json!({
+            "Config": {"WorkingDir": "/sf"},
+            "Mounts": [{"Type": "bind", "Destination": "/workspace/app", "Source": "/tmp/app"}]
+        }))
+        .unwrap();
+        assert_eq!(working_dir_from_inspect(&inspect), "/sf");
+    }
+
+    #[test]
+    fn container_working_dir_defaults_to_root_and_preserves_configured_paths() {
+        for (config, expected) in [
+            (serde_json::Value::Null, "/"),
+            (serde_json::json!({}), "/"),
+            (serde_json::json!({"WorkingDir": ""}), "/"),
+            (serde_json::json!({"WorkingDir": "/"}), "/"),
+            (serde_json::json!({"WorkingDir": "/my project/ "}), "/my project/ "),
+        ] {
+            let inspect = serde_json::from_value(serde_json::json!({"Config": config})).unwrap();
+            assert_eq!(working_dir_from_inspect(&inspect), expected);
         }
     }
 

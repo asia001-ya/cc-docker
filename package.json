@@ -1,7 +1,7 @@
 {
   "name": "tht-docker-claude",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Claude 多容器终端管理器（终端至上的 Windows 桌面端）",
   "type": "module",
   "scripts": {

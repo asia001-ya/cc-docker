@@ -6,10 +6,10 @@ import { containerQuotaRefresh, errorText, isTauri } from "../../api/commands";
 import { useFleetStore } from "../../store/fleetStore";
 import { useActiveSession } from "../../store/tabStore";
 import { useUiStore } from "../../store/uiStore";
-import { freshness, HEALTH_LABEL } from "../../lib/quota";
+import { HEALTH_LABEL } from "../../lib/quota";
 import type { FleetEntry } from "../../api/types";
 import { Icon, IconButton, StatusDot } from "../ui/controls";
-import { QuotaWindowRow as WindowRow } from "./QuotaWindowRow";
+import { QuotaDetails } from "./QuotaDetails";
 import { openInPreview } from "../terminal/previewActions";
 import { useNow } from "./StatusBar";
 
@@ -71,19 +71,12 @@ function Row({ entry, current, onSwitch }: { entry: FleetEntry; current: boolean
       {refreshError && <p role="alert" className="font-ui text-body-sm text-st-bad">{refreshError}</p>}
       {isApi ? (
         <div className="font-ui text-body-sm text-on-surface-variant">
-          按量计费 · {entry.provider?.base_url ?? "官方 API"} · {entry.provider?.model ?? "默认模型"}
+          按量计费 · {entry.provider?.base_url ?? "官方 API"}
         </div>
       ) : entry.health === "stopped" ? (
         <div className="font-ui text-body-sm text-outline">容器未运行</div>
       ) : (
-        <>
-          <WindowRow label="5小时" win={entry.quota?.five_hour} now={now} />
-          <WindowRow label="周" win={entry.quota?.seven_day} now={now} />
-          <div className="flex items-center justify-between font-ui text-label-sm text-outline">
-            <span className="truncate">{entry.account?.email ?? "未读取到账号"}</span>
-            <span>数据 {freshness(entry.quota?.rate_limits_updated_at, now)}</span>
-          </div>
-        </>
+        <QuotaDetails quota={entry.quota} now={now} account={entry.account?.email} />
       )}
       {entry.ports.length > 0 && (
         <div className="flex flex-wrap gap-1">
